@@ -13,7 +13,7 @@ Built for the **Arduino Physical AI Challenge India 2026**.
 | | |
 |---|---|
 | ML pipeline (train / quantize / evaluate) | Done — macro F1 0.757, see [Results](#results-held-out-patients-int8-onnx) below |
-| Desktop demo GUI | ✅ Done — dual waveform, test-fold-only enforced by an automated guard |
+| Desktop demo GUI | Done — dual waveform, test-fold-only enforced by an automated guard |
 | On-device deployment (Arduino App Lab) | Done and verified — live browser dashboard, no-hardware demo replay button |
 | Live BioAmp EXG Pill sensor integration | In progress — hardware chain validated end-to-end (real ADC noise through the real Bridge pipeline); electrode test with a real signal is the current step |
 
