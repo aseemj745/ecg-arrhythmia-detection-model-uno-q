@@ -4,8 +4,6 @@ Per-beat 5-class arrhythmia classification (NOR / LBBB / RBBB / PVC / AFIB)
 from a single MLII-equivalent lead, trained on MIT-BIH and exported to a
 91 KB INT8 ONNX model for the QRB2210 Linux side of an Arduino UNO Q.
 
-Built for the **Arduino Physical AI Challenge India 2026**.
-
 ---
 
 ## Status
