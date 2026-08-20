@@ -1,0 +1,6 @@
+# Runtime dependencies for the Arduino UNO Q (QRB2210, aarch64 Debian).
+# Deliberately minimal: no torch, no matplotlib, no wfdb.
+numpy>=1.24
+scipy>=1.10
+onnxruntime>=1.16
+pyserial>=3.5      # only needed for --serial input

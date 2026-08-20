@@ -1,0 +1,45 @@
+# Python environment
+.venv/
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+
+# Personal working notes - not for the public repo
+my_notes.md
+
+# MIT-BIH raw data - large, regenerable via step1_build_dataset.py
+# (PhysioNet data is redistributable, but keeping the repo lean is the
+# usual convention; document "run step1_build_dataset.py" instead)
+data/mitdb/
+
+# Generated dataset / model artifacts - regenerable via step1-4 scripts.
+# Keep the small, final things you actually want to show (e.g. copy a
+# results screenshot or a specific plot into a docs/ folder) rather than
+# tracking this whole directory.
+artifacts/dataset/
+artifacts/models/*.pt
+artifacts/*.tar.gz
+artifacts/*.zip
+
+# App Lab build output - large (offline wheels ~17MB) and rebuildable via
+# package_applab.py. Keep applab/python, applab/assets, applab/ecg,
+# applab/app.yaml etc. (the actual source) tracked; drop the built
+# artifacts and vendored binary wheels.
+applab/wheels/*.whl
+applab/artifacts/
+applab/detections*.csv
+
+# Runtime output, not source
+detections*.csv
+*.log
+
+# Full report dump - regenerable via step4_evaluate.py (incl. ablation and
+# intermediate-checkpoint variants). Curated copies of the final model's
+# results live in docs/images/ and are referenced from README.md instead.
+artifacts/reports/
+artifacts/capture_119_250hz.csv
+
+# EDA output from scripts/exploratory/ - regenerable, not pipeline output.
+plots/

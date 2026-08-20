@@ -1,0 +1,11 @@
+name: ECG Arrhythmia Classifier
+icon: "💓"
+description: >-
+  Per-beat arrhythmia classification (Normal / LBBB / RBBB / PVC / AFib) from
+  a single ECG lead, running an INT8 ONNX CNN on the QRB2210 Linux side. Runs
+  a no-hardware self-test on a held-out MIT-BIH patient by default, and
+  serves a live dashboard once connected to the BioAmp EXG Pill via the MCU
+  Bridge.
+version: "1.0.0"
+bricks:
+  - arduino:web_ui

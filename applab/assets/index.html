@@ -1,0 +1,64 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<title>ECG Arrhythmia Classifier - Arduino UNO Q</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0f1115; color:#e6e6e6;
+         font:14px/1.4 -apple-system,Segoe UI,Roboto,sans-serif; }
+  header { padding:14px 20px; background:#161922; border-bottom:1px solid #262b38; }
+  h1 { font-size:16px; margin:0 0 4px; }
+  #status { font-size:12.5px; color:#9aa4b2; }
+  #status b { color:#e6e6e6; }
+  .badge { display:inline-block; padding:1px 8px; border-radius:10px;
+           font-size:11px; font-weight:600; margin-left:6px; }
+  .b-live { background:#7f1d1d; color:#fecaca; }
+  .b-selftest { background:#1e3a5f; color:#bfdbfe; }
+  .b-demo { background:#78350f; color:#fed7aa; }
+  main { padding:16px 20px; max-width:1100px; margin:0 auto; }
+  .demobar { margin:10px 0 0; }
+  button.demo { background:#2b6cb0; color:#fff; border:0; padding:7px 14px;
+                border-radius:6px; font-size:12.5px; font-weight:600; cursor:pointer; }
+  button.demo.stop { background:#7f1d1d; }
+  button.demo:disabled { opacity:.5; cursor:default; }
+  .hint { color:#6b7280; font-size:11.5px; margin-left:10px; }
+  canvas { width:100%; height:260px; background:#0b0d12; border:1px solid #262b38;
+           border-radius:8px; display:block; }
+  table { width:100%; border-collapse:collapse; margin-top:14px; font-size:13px; }
+  th,td { text-align:left; padding:6px 10px; border-bottom:1px solid #20242e; }
+  th { color:#9aa4b2; font-weight:600; font-size:11.5px; text-transform:uppercase;
+       letter-spacing:.04em; }
+  .pill { padding:2px 8px; border-radius:10px; font-weight:700; font-size:12px;
+          color:#0b0d12; }
+  .lowconf { opacity:.55; }
+  #empty { color:#6b7280; padding:14px 0; }
+  footer { padding:16px 20px; color:#5b6472; font-size:11.5px; }
+</style></head>
+<body>
+<header>
+  <h1>ECG Arrhythmia Classifier<span id="modebadge" class="badge"></span></h1>
+  <div id="status">connecting ...</div>
+  <div class="demobar">
+    <button id="demoBtn" class="demo" disabled>Start Demo Replay</button>
+    <span class="hint">No sensor attached yet? Replays a real, held-out
+      MIT-BIH patient so you can see the dashboard work right now - always
+      clearly labelled, never shown as live sensor data.</span>
+  </div>
+</header>
+<main>
+  <canvas id="wave" width="1000" height="260"></canvas>
+  <table>
+    <thead><tr><th>Class</th><th>Time</th><th>Beats</th><th>HR</th>
+      <th>Confidence</th><th>Annotated</th></tr></thead>
+    <tbody id="episodes"></tbody>
+  </table>
+  <div id="empty" style="display:none">No arrhythmia episodes detected yet.</div>
+</main>
+<footer>Rendering happens in this browser; every number above is computed on
+  the Arduino UNO Q that served this page, pushed live over the App Lab
+  WebUI Brick.</footer>
+
+<script src="libs/socket.io.min.js"></script>
+<script src="libs/arduino.js"></script>
+<script src="app.js"></script>
+</body></html>
