@@ -13,7 +13,7 @@ from a single MLII-equivalent lead, trained on MIT-BIH and exported to a
 | ML pipeline (train / quantize / evaluate) | Done — macro F1 0.757, see [Results](#results-held-out-patients-int8-onnx) below |
 | Desktop demo GUI | Done — dual waveform, test-fold-only enforced by an automated guard |
 | On-device deployment (Arduino App Lab) | Done and verified — live browser dashboard, no-hardware demo replay button |
-| Live BioAmp EXG Pill sensor integration | In progress — real electrode signal captured and validated (clean PQRST morphology, ~90–103 bpm, physiologically plausible RR/QRS/QT); wiring the live path into the on-device classifier is the current step |
+| Live BioAmp EXG Pill + MPU6050 sensor integration | Done — confirmed live on the board via App Lab's own Start button, both sensors physically wired: real-time beat classification and motion-gated episodes appear on the dashboard, not just a replay |
 
 **Fixed 2026-08-20:** the classifier previously assumed the MCU samples ECG
 at 250 Hz, matching two of the reference sketches used during development.
@@ -156,13 +156,17 @@ These are stated because they affect how the numbers should be read.
   is genuinely 250 Hz (`SELFTEST_SAMPLE_RATE`, a separate constant) — the
   demo-replay path decimates it 2:1 before feeding it into the live stream
   so the two rates never mix.
-- **Live sensor integration is in progress, not finished.** The Bridge
-  pipeline (MCU → Linux side) has been checked end-to-end with real ADC
-  samples, and a real electrode signal (BioAmp EXG Pill) has now been
-  captured and shown to produce plausible PQRST morphology and HR once the
-  sample-rate bug above was fixed — but that validation was done offline
-  against a downloaded capture, not yet through the on-device live
-  classifier path. See [Status](#status) above.
+- **The live sensor path works end-to-end; live-domain accuracy is a
+  separate, unmeasured claim.** Running the app for real — App Lab's own
+  Start button, both the BioAmp EXG Pill and MPU6050 physically wired —
+  produces live beat classification and motion-gated episodes on the
+  on-device dashboard itself, not just an offline replay. What this does
+  **not** mean: there is no ground-truth-labelled live capture to score
+  against the way the MIT-BIH test fold is, so live-domain precision/recall
+  is not a reported number here, only "the pipeline runs and produces
+  plausible output" (see the beat-shape comparison below). The macro F1
+  0.757 headline figure is a MIT-BIH number; treat it as such until a live
+  capture is actually scored.
 
 <img src="docs/images/beat_comparison_live_vs_mitbih.png" alt="Average beat shape: a real BioAmp EXG Pill capture next to MIT-BIH, aligned on the R-peak" width="700">
 
