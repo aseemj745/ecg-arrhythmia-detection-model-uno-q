@@ -158,7 +158,7 @@ These are stated because they affect how the numbers should be read.
   so the two rates never mix.
 - **The live sensor path works end-to-end; live-domain accuracy is a
   separate, unmeasured claim.** Running the app for real — App Lab's own
-  Start button, both the BioAmp EXG Pill and MPU6050 physically wired —
+  Live Sensor button, both the BioAmp EXG Pill and MPU6050 physically wired —
   produces live beat classification and motion-gated episodes on the
   on-device dashboard itself, not just an offline replay. What this does
   **not** mean: there is no ground-truth-labelled live capture to score
