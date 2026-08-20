@@ -57,21 +57,23 @@ electrodes attached.
 
 1. App Lab → **Create new app +** → **Import an App** → **Import from
    computer** → pick the zip.
-2. Open the app and run the self-test:
+2. Open the app and run the self-test (the app's default mode is `live`, so
+   `--mode selftest` has to be explicit here):
 
    ```bash
-   python3 python/main.py
+   python3 python/main.py --mode selftest
    ```
 
 3. Expect roughly 15–25 **PVC-only** episodes and a `SELF-TEST PASSED` line.
    Record 119 is a bigeminy patient the model has never seen, so PVCs are
    the correct answer and any AFIB/LBBB/RBBB would be a red flag.
 
-**The manifest (`app.yaml`) is an unverified guess** — App Lab apps live on
-the board, not on the PC, so its exact 0.8.0 schema could not be checked. If
-the import is rejected, do not fight it; run
-`python package_applab.py --show-manifest-help` and dump the manifest of a
-working app instead. Route B below does not depend on the manifest at all.
+This whole path — import, self-test, the live dashboard — has been run for
+real on the board; see [`applab/README.md`](applab/README.md) for how it
+works. If App Lab ever rejects the import (e.g. after an App Lab version
+change), run `python package_applab.py --show-manifest-help` and compare
+against a working app's manifest. Route B below doesn't depend on App Lab
+at all, so it's a fallback if that ever happens.
 
 ## Route B — plain files over the terminal (always works)
 
