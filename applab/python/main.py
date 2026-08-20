@@ -10,16 +10,21 @@ TWO MODES
 ---------
 selftest (default via --mode selftest)  Replays a bundled 90 s recording of
                     MIT-BIH record 119 - a patient the model was NEVER
-                    trained on - resampled to 250 Hz, the same rate the MCU
-                    sketch samples A0 at. Needs NO sensor and NO electrodes.
-                    Run this first: it proves the model executes correctly
-                    on ARM, separately from any question about wiring.
+                    trained on - resampled to 250 Hz during dataset prep.
+                    This is unrelated to the real MCU's sample rate (see
+                    below); the replay paces and resamples itself
+                    independently via SELFTEST_SAMPLE_RATE. Needs NO sensor
+                    and NO electrodes. Run this first: it proves the model
+                    executes correctly on ARM, separately from any question
+                    about wiring.
 
 live                Reads samples pushed by the MCU over the App Lab Bridge.
 
                     The Bridge is PUSH, not pull: the MCU sketch calls
                     Bridge.notify("ecg_batch", batch) roughly every 100 ms
-                    (25 raw ADC ints @ 250 Hz), which the App Lab framework
+                    (~12-13 raw ADC ints @ 125 Hz - observed batch sizes on
+                    real hardware run 14-22, since the push interval is not
+                    exactly 100ms), which the App Lab framework
                     delivers to whatever function was registered with
                     Bridge.provide("ecg_batch", ...). Confirmed against the
                     working ecg-monitor and ecg_uno_q_project apps on this
@@ -76,6 +81,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import numpy as np
+from scipy.signal import resample_poly
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP_ROOT))
@@ -87,17 +93,34 @@ from ecg.pipeline import (ECGAnalyzer, StreamAnalyzer,             # noqa: E402
 MODEL = APP_ROOT / "models" / "model_int8.onnx"
 SAMPLE = APP_ROOT / "data" / "sample_ecg_250hz.csv"
 
-# The MCU sketch samples A0 at 250 Hz (confirmed by reading FS_HZ in the
-# .ino of both ecg-monitor and ecg_uno_q_project). If that ever changes,
-# change it here too - everything downstream is derived from this number,
-# and getting it wrong does not crash anything, it just silently scales
-# every heart rate and duration.
-MCU_SAMPLE_RATE = 250
+# The MCU sketch samples A0 at 125 Hz. Originally assumed 250 Hz from a
+# stale comment in the .ino; corrected 2026-08-20 after two independent
+# confirmations: (1) the literal FS_HZ constant in ecg-monitor's sketch.ino
+# is 125, and (2) a real BioAmp EXG Pill capture's own timestamps measured
+# 124.96 Hz empirically (2950 samples over 23.60 real seconds). Running our
+# Pan-Tompkins detector on that same capture at 125 Hz gave a physiologically
+# plausible ~103 bpm; at the old (wrong) 250 Hz assumption it gave ~200 bpm -
+# every downstream heart rate and duration was being computed exactly 2x too
+# fast. If this ever changes again, change it here too - everything
+# downstream is derived from this number, and getting it wrong does not
+# crash anything, it just silently scales every heart rate and duration.
+MCU_SAMPLE_RATE = 125
 
-# Batch size the MCU sends per Bridge.notify() call (25 samples @ 250 Hz =
-# 100 ms of ECG per push). Not load-bearing anywhere below - the queue-based
-# drain in read_bridge_batch() works for any batch size - but documented
-# here since it is what "one push" means when reading logs.
+# Native rate of the bundled MIT-BIH selftest/demo capture (sample_ecg_250hz.csv),
+# resampled to 250 Hz during dataset prep. Deliberately a SEPARATE constant
+# from MCU_SAMPLE_RATE now that the two are known to differ - selftest_source()
+# paces/interprets the file at its own true rate; _demo_replay_worker()
+# decimates it down to MCU_SAMPLE_RATE before feeding it into the live-mode
+# stream, since that shared stream is created with fs=MCU_SAMPLE_RATE.
+SELFTEST_SAMPLE_RATE = 250
+
+# Batch size the MCU sends per Bridge.notify() call: BATCH_SIZE in
+# sketch/sketch.ino is 25, which at 125 Hz is 200 ms of ECG per push.
+# (The "Batch size: 14-22" numbers in the sketch's serial debug output are
+# the PARTIAL batch still being filled at the moment of the 1 Hz debug
+# print, not the size that gets sent.) Not load-bearing anywhere below -
+# the queue-based drain in read_bridge_batch() works for any batch size -
+# but documented here since it is what "one push" means when reading logs.
 MCU_BATCH_SIZE = 25
 
 DASHBOARD_PORT = 8080
@@ -109,6 +132,130 @@ DASHBOARD_WINDOW_S = 8.0     # seconds of waveform shown on the page
 # --------------------------------------------------------------------------
 _bridge_queue: "queue.Queue" = queue.Queue()
 
+# Set while "Start Demo Replay" is running. Declared here (above
+# _on_ecg_batch, which reads it) rather than next to the demo code below,
+# because the real Bridge callback has to know to stand aside.
+_demo_stop: "threading.Event | None" = None
+
+# Which source, if any, currently owns the analysis stream.
+#
+#   "idle"  nothing is being analysed. THIS IS THE START STATE. The MCU
+#           sketch pushes from the moment the app boots, so starting in
+#           "live" meant a session was always already running against
+#           whatever the electrodes happened to be doing before anyone had
+#           chosen anything - the first thing on screen was a half-warmed-up
+#           run nobody asked for, and stopping it was not even possible.
+#   "live"  BioAmp EXG Pill via the MCU Bridge.
+#   "demo"  MIT-BIH replay from the bundled CSVs.
+#
+# Exactly one owner at a time. That single-owner rule is what keeps the two
+# signal sources out of each other's buffer - see _on_ecg_batch.
+_run_mode = "idle"
+
+
+# Motion state, pushed by the sketch as Bridge.notify("motion_state", 0/1).
+#
+# The MCU already owns the decision: it samples the MPU6050 at 50 Hz,
+# compares |accel| against a slowly-adapting baseline (MOTION_THRESHOLD_G,
+# debounced MOTION_DEBOUNCE_COUNT samples) and, while motion is present,
+# stops pushing ecg_batch at all. So by the time anything reaches this
+# process the motion-corrupted samples are already gone - Linux is not
+# filtering here, it is REPORTING what the MCU decided, which is the only
+# honest way to describe it on screen.
+#
+# Deliberately NOT resetting StreamAnalyzer when motion ends. A pause makes
+# the samples either side of it adjacent, and the reflex is to treat that
+# splice as dangerous - but measured on record 234 with five pauses of
+# 1.5-4 s, every one of the 106 beats still came back NOR (mean confidence
+# 0.63) and no episode was reported even with the gate off. RR_CLIP drops
+# the single anomalous interval and the 10-beat window absorbs the rest.
+# Resetting would instead cost ~10 s of RR warmup blindness after every
+# movement, which is a real loss to buy nothing.
+# Motion pauses shorter than this are not logged - see _on_motion_state.
+MIN_MOTION_LOG_S = 0.30
+
+_motion_active = False
+_motion_started_at = 0.0
+_motion_windows = collections.deque(maxlen=200)   # completed, for the UI
+_motion_log = queue.Queue()                       # completed, for the CSV
+
+
+def _on_motion_state(value, stream=None):
+    """Bridge.provide("motion_state", ...) - edge-triggered by the sketch.
+
+    Runs on the framework's dispatch thread like _on_ecg_batch, so it does
+    the minimum: flip a flag, and hand a completed window to a queue for
+    run_loop to write. Wall-clock is the right clock for DURATION - during
+    motion no samples arrive, so there is no sample counter to measure the
+    pause length with.
+
+    `stream` (StreamAnalyzer) is passed only to read where, in SAMPLE time,
+    the pause happened - `stream.offset + len(stream.buf)` is the sample
+    index of the very next sample that will arrive, which is exactly the
+    splice point: the buffer has no gap in it (no samples were ever missing
+    from the array, motion just means fewer of them arrived), so this index
+    is simultaneously "last sample before" and "first sample after" the
+    pause. That is what lets the browser place a marker on the waveform at
+    the right x position - the wave axis is sample time, not wall time.
+    """
+    global _motion_active, _motion_started_at
+    # Only meaningful while the live sensor owns the stream. The IMU keeps
+    # reporting during a demo replay or in idle - somebody can always bump
+    # the bench - but what is being analysed then is a file, so recording
+    # "ECG paused by movement" against it would be false. Caught by the
+    # motion test: a bump during a demo left a phantom window that then
+    # showed up in the next live session.
+    if _run_mode != "live":
+        return
+    try:
+        moving = bool(int(value))
+    except (TypeError, ValueError):
+        print("[motion] unexpected payload %r, ignoring" % (value,), flush=True)
+        return
+    if moving == _motion_active:
+        return
+    now = time.time()
+    if moving:
+        _motion_active = True
+        _motion_started_at = now
+        print("  [MOTION] movement detected - MCU paused ECG", flush=True)
+    else:
+        _motion_active = False
+        dur = now - _motion_started_at
+        sample_t = None
+        if stream is not None and stream.fs:
+            sample_t = (stream.offset + len(stream.buf)) / stream.fs
+        window = {"start": _motion_started_at, "end": now,
+                  "duration": round(dur, 2), "sample_t": sample_t}
+        if dur < MIN_MOTION_LOG_S:
+            # Too short to be worth a row. The gate still fired and the
+            # banner still showed - this only decides what is worth
+            # RECORDING. A floor here is belt-and-braces next to the
+            # sketch's slow-release debounce: if a board is still running
+            # older firmware with the symmetric debounce, this alone keeps
+            # the Motion log and detections.csv readable instead of a wall
+            # of sub-0.2s rows.
+            print("  [MOTION] settled after %.2fs - too brief to log"
+                  % dur, flush=True)
+        else:
+            _motion_windows.append(window)
+            _motion_log.put(window)
+            print("  [MOTION] settled after %.1fs - ECG resumed" % dur,
+                  flush=True)
+
+
+def _demo_active():
+    return _demo_stop is not None and not _demo_stop.is_set()
+
+
+def _enqueue(samples):
+    """The demo's way into the analysis queue.
+
+    Deliberately NOT _on_ecg_batch(): that now drops everything while a demo
+    is active, which would make the demo silence itself.
+    """
+    _bridge_queue.put(samples)
+
 
 def _on_ecg_batch(samples):
     """
@@ -118,12 +265,55 @@ def _on_ecg_batch(samples):
     pushes on - not necessarily our own. Must never block and never raise,
     so it does nothing but validate the shape and drop the batch in a
     thread-safe queue; all real work happens later, off this callback.
+
+    Unless live mode is the current owner of the stream this DISCARDS the
+    batch. The MCU sketch streams continuously the moment the app starts,
+    so without this gate the sensor's samples end up interleaved with the
+    demo's MIT-BIH samples in one buffer - alternating clean and noisy
+    segments that make the waveform look corrupted and drop the model to
+    near-chance confidence - and, in idle, the app analyses a stream nobody
+    asked it to analyse. (Neither was possible before the app shipped its
+    own sketch; until then nothing was pushing.) Live is an explicit
+    choice, so the sensor is heard only once it has been made.
     """
+    if _run_mode != "live":
+        return
     if not isinstance(samples, (list, tuple)):
         print(f"[ECG] Bridge sent unexpected type {type(samples)} for "
               f"'ecg_batch', ignoring", flush=True)
         return
     _bridge_queue.put(samples)
+
+
+def drain_bridge_queue():
+    """
+    Throw away anything already queued but not yet analysed.
+
+    Needed when switching between demo replay and real sensor data: both
+    sources feed the SAME _bridge_queue via _on_ecg_batch(), so without this
+    a demo that was just stopped leaves batches sitting in the queue which
+    run_loop() then drains and reports as if they had come from the sensor.
+    That is what made the dashboard flash "LIVE - receiving ECG data" with
+    thousands of samples while no MCU was connected at all.
+    """
+    try:
+        while True:
+            _bridge_queue.get_nowait()
+    except queue.Empty:
+        pass
+
+
+# Bumped on every demo start/stop. run_loop() watches it and throws away its
+# own local per-run state (sample count, beat list, reported-episode set)
+# when it changes - those live in locals, so clearing StreamAnalyzer and
+# DashboardState alone would still leave run_loop happily grouping demo
+# beats together with live ones into a single episode.
+_stream_generation = 0
+
+
+def request_stream_reset():
+    global _stream_generation
+    _stream_generation += 1
 
 
 def read_bridge_batch():
@@ -162,17 +352,61 @@ def read_bridge_batch():
 # the real one, so it can be demoed with zero hardware. This is that same
 # idea, wired onto our dashboard's own "Start Demo Replay" button.
 #
-# It works by feeding the bundled MIT-BIH capture into _on_ecg_batch() - the
-# EXACT SAME callback a real Bridge.notify("ecg_batch", ...) push calls -
-# so from run_loop()'s point of view this is indistinguishable from a real
-# sensor. This is the identical mechanism already verified end-to-end this
-# session (23/23 PVC, all samples processed, clean stop) when simulating
-# what a real MCU sketch would send.
-_demo_stop: "threading.Event | None" = None
+# It works by feeding a bundled MIT-BIH capture into the same analysis queue
+# a real Bridge.notify("ecg_batch", ...) push lands in, so from run_loop()'s
+# point of view this is indistinguishable from a real sensor.
+#
+# Any of the records in data/demo_records.json can be chosen from the
+# dashboard dropdown. Every one is TEST FOLD - a patient the model never
+# trained on - which is what makes a correct detection here evidence of
+# anything. scripts/export_demo_records.py writes them, and the split guard
+# in step1b_check_split.py is what actually enforces the test-only rule.
 
 
-def _demo_replay_worker(stop_event):
-    data = np.loadtxt(SAMPLE, delimiter=",", dtype=np.float64)
+def load_demo_records():
+    """Read the demo manifest. Missing/corrupt -> just the legacy capture,
+    so an older data/ directory still gives a working demo button."""
+    path = APP_ROOT / "data" / "demo_records.json"
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+        if records:
+            return records
+    except Exception as exc:
+        print(f"[ECG] could not read {path.name} ({exc}); "
+              f"falling back to the bundled single capture", flush=True)
+    return [{"record": "119", "condition": "PVC", "file": SAMPLE.name,
+             "fs": SELFTEST_SAMPLE_RATE, "seconds": 90,
+             "note": "442 PVC in bigeminy"}]
+
+
+DEMO_RECORDS = load_demo_records()
+DEFAULT_DEMO_RECORD = "119"
+
+
+def _demo_meta(record_id):
+    for r in DEMO_RECORDS:
+        if r["record"] == str(record_id):
+            return r
+    return DEMO_RECORDS[0]
+
+
+def _demo_replay_worker(stop_event, meta):
+    # This feeds the SAME live-mode stream real Bridge pushes go into (that
+    # stream is created with fs=MCU_SAMPLE_RATE), but the bundled captures
+    # are stored at their own rate (250 Hz). Resample to MCU_SAMPLE_RATE
+    # here so what arrives is already at the rate the stream expects -
+    # otherwise the demo plays at the wrong speed and 250 Hz-shaped beats go
+    # through a filter tuned for 125 Hz, warping every waveform the model
+    # sees. resample_poly, NOT data[::2]: plain slicing aliases high
+    # -frequency QRS energy down into the band the model reads.
+    src_fs = int(meta.get("fs", SELFTEST_SAMPLE_RATE))
+    data = np.loadtxt(APP_ROOT / "data" / meta["file"], delimiter=",",
+                      dtype=np.float64)
+    if src_fs != MCU_SAMPLE_RATE:
+        from math import gcd
+        g = gcd(src_fs, MCU_SAMPLE_RATE)
+        data = resample_poly(data, MCU_SAMPLE_RATE // g, src_fs // g)
+
     chunk = max(1, MCU_SAMPLE_RATE // 20)
     i = 0
     while not stop_event.is_set():
@@ -180,47 +414,130 @@ def _demo_replay_worker(stop_event):
         if len(batch) == 0:
             i = 0                      # loop the capture - a demo running
             continue                   # unattended should not go quiet
-        _on_ecg_batch(batch.tolist())
+        _enqueue(batch.tolist())
         i += chunk
         time.sleep(chunk / MCU_SAMPLE_RATE)
 
 
-def start_demo_replay(dashboard):
-    """Idempotent: a second click while already running does nothing."""
-    global _demo_stop
-    if _demo_stop is not None and not _demo_stop.is_set():
-        return
-    _demo_stop = threading.Event()
+def _reset_stream(dashboard, stream):
+    """Common teardown for every mode switch.
+
+    Both directions matter: whatever was running must leave nothing behind
+    that the next mode could pick up and report as its own - queued
+    batches, StreamAnalyzer buffer, run_loop's locals, dashboard history,
+    and motion windows.
+    """
+    global _motion_active
+    _motion_active = False
+    _motion_windows.clear()
+    try:
+        while True:
+            _motion_log.get_nowait()
+    except queue.Empty:
+        pass
+    drain_bridge_queue()
+    request_stream_reset()
+    if stream is not None:
+        stream.reset()
     if dashboard is not None:
-        dashboard.status = "DEMO REPLAY - MIT-BIH record 119, NOT a live sensor"
-        dashboard.source_desc = ("DEMO replay of a held-out MIT-BIH patient "
-                                 "(119) - not connected to a real sensor")
-    threading.Thread(target=_demo_replay_worker, args=(_demo_stop,),
+        dashboard.clear_history()
+
+
+def start_live_capture(dashboard, stream=None):
+    """Begin analysing the BioAmp sensor. Idempotent."""
+    global _run_mode, _demo_stop
+    if _run_mode == "live":
+        return
+    if _demo_stop is not None:
+        _demo_stop.set()
+    _reset_stream(dashboard, stream)
+    _run_mode = "live"
+    if dashboard is not None:
+        dashboard.demo_record = None
+        dashboard.gates = {c: C.LIVE_MIN_EPISODE_CONFIDENCE for c in C.CLASSES}
+        dashboard.status = "waiting for the MCU sketch..."
+        dashboard.source_desc = "LIVE via BioAmp EXG Pill / MCU Bridge"
+    print("  [LIVE] capturing from BioAmp EXG Pill", flush=True)
+
+
+def stop_capture(dashboard, stream=None):
+    """Return to idle: stop whatever is running and analyse nothing.
+
+    This is the Stop button. It exists so a demo record can be swapped
+    without going through live mode - stopping releases the dropdown, and
+    the next Start picks up the newly chosen record.
+    """
+    global _run_mode, _demo_stop
+    if _demo_stop is not None:
+        _demo_stop.set()
+    # The demo worker may be mid-sleep and push one more batch after the
+    # flag is set, so drain AFTER setting it; run_loop's generation check
+    # discards anything that still slips through that window.
+    _reset_stream(dashboard, stream)
+    _run_mode = "idle"
+    if dashboard is not None:
+        dashboard.gates = {c: 0.0 for c in C.CLASSES}
+        dashboard.status = "IDLE - choose Live Sensor or Demo Replay to start"
+        dashboard.source_desc = "nothing running"
+        dashboard.warmup_note = ""
+    print("  [IDLE] stopped", flush=True)
+
+
+def start_demo_replay(dashboard, stream=None, record=None):
+    """Idempotent: a second click while already running does nothing.
+
+    Clears prior history first (both directions - see clear_history's
+    docstring) so a demo run starts from a clean dashboard rather than
+    appending onto whatever real (or previous demo) beats/episodes were
+    already showing.
+    """
+    global _demo_stop, _run_mode
+    if _demo_active():
+        return
+    meta = _demo_meta(record or DEFAULT_DEMO_RECORD)
+    _demo_stop = threading.Event()
+    _reset_stream(dashboard, stream)
+    _run_mode = "demo"
+    if dashboard is not None:
+        dashboard.demo_record = meta["record"]
+        # Demo replays database signal, so it is graded on the per-class
+        # MIT-BIH map - tell the page the same thing run_loop will use.
+        dashboard.gates = {c: C.MIN_EPISODE_CONFIDENCE.get(c, 0.0)
+                           for c in C.CLASSES}
+        dashboard.status = (
+            f"DEMO REPLAY - MIT-BIH record {meta['record']} "
+            f"({meta['condition']}), NOT a live sensor")
+        dashboard.source_desc = (
+            f"DEMO replay of held-out MIT-BIH patient {meta['record']} - "
+            f"{meta['note']} - not connected to a real sensor")
+    print(f"  [DEMO] replaying record {meta['record']} "
+          f"({meta['condition']}): {meta['note']}", flush=True)
+    threading.Thread(target=_demo_replay_worker, args=(_demo_stop, meta),
                      daemon=True).start()
 
 
-def stop_demo_replay(dashboard):
-    if _demo_stop is not None:
-        _demo_stop.set()
-    if dashboard is not None:
-        dashboard.status = "waiting for the MCU sketch..."
-        dashboard.source_desc = "LIVE via BioAmp EXG Pill / MCU Bridge"
+def stop_demo_replay(dashboard, stream=None):
+    """Kept as a name because callers and tests use it; stopping the demo
+    now lands in idle rather than silently starting live capture."""
+    stop_capture(dashboard, stream)
 
 
 def selftest_source():
-    """Replay the bundled capture, paced to real time."""
+    """Replay the bundled capture, paced to real time, at its own native
+    rate (SELFTEST_SAMPLE_RATE) - independent of MCU_SAMPLE_RATE, since the
+    two are known to differ."""
     data = np.loadtxt(SAMPLE, delimiter=",", dtype=np.float64)
-    chunk = max(1, MCU_SAMPLE_RATE // 20)          # ~50 ms batches
+    chunk = max(1, SELFTEST_SAMPLE_RATE // 20)     # ~50 ms batches
     state = {"i": 0}
 
     def read():
         if state["i"] >= len(data):
             return None
-        time.sleep(chunk / MCU_SAMPLE_RATE)
+        time.sleep(chunk / SELFTEST_SAMPLE_RATE)
         out = data[state["i"]:state["i"] + chunk]
         state["i"] += chunk
         return out
-    return read, f"bundled capture ({len(data) / MCU_SAMPLE_RATE:.0f}s)"
+    return read, f"bundled capture ({len(data) / SELFTEST_SAMPLE_RATE:.0f}s)"
 
 
 # --------------------------------------------------------------------------
@@ -248,6 +565,35 @@ class DashboardState:
         self.started_at = time.time()
         self.beats = collections.deque(maxlen=300)
         self.episodes = collections.deque(maxlen=100)
+        # Shown while the model has not classified anything yet. Not an
+        # error state - see run_loop for why the first beats are unlabelled.
+        self.warmup_note = ""
+        # Confidence an episode needs to be reported. Sent to the browser so
+        # the waveform can label exactly the beats the table would report -
+        # otherwise the page shows PVC/AFIB/RBBB text on beats that never
+        # appear in the episode list, which reads as the table dropping
+        # detections when it is really the gate doing its job.
+        # Per-class, because that is how the gate actually works in demo
+        # mode (MIN_EPISODE_CONFIDENCE: PVC 0.50, LBBB/RBBB/AFIB 0.0). A
+        # single number here was wrong: the page was told 0.55 while the
+        # backend grouped demo episodes on the per-class map, so beats were
+        # drawn faded as "not reported" that the table then reported, and
+        # vice versa. Sending the whole map keeps the two in step.
+        self.gates = {c: 0.0 for c in C.CLASSES}
+        # Which demo record is playing, so the dropdown can show the right
+        # selection after a reconnect or a second browser opening the page.
+        self.demo_record = DEFAULT_DEMO_RECORD
+
+    def clear_history(self):
+        """Wipe beats/episodes/samples_seen. Called on every demo-replay
+        start AND stop, so demo results can never linger and get mistaken
+        for real sensor results once demo is stopped (or vice versa) - the
+        two data sources share the same _on_ecg_batch()/stream/dashboard
+        objects with nothing else distinguishing them after the fact."""
+        with self._lock:
+            self.beats.clear()
+            self.episodes.clear()
+            self.samples_seen = 0
 
     def push_beat(self, b):
         with self._lock:
@@ -287,11 +633,35 @@ class DashboardState:
             episodes = list(self.episodes)[-25:]
             status, mode, source_desc = self.status, self.mode, self.source_desc
             samples_seen = self.samples_seen
+            warmup_note = self.warmup_note
+            gates = dict(self.gates)
+            demo_record = self.demo_record
 
         return {
             "mode": mode, "source": source_desc, "status": status,
             "now": round(now, 3), "fs": fs, "t0": round(t0, 3),
-            "samples_seen": samples_seen,
+            "samples_seen": samples_seen, "warmup": warmup_note,
+            "gates": gates, "demo_record": demo_record,
+            "run_mode": _run_mode,
+            # Motion is only meaningful for the live sensor - a demo replay
+            # is a file, nothing is attached to anybody.
+            "motion": bool(_motion_active) and _run_mode == "live",
+            # Feeds three things on the page: the vertical marker on the
+            # waveform (t, in the same sample-time axis as wave/beats), and
+            # the Motion Log table (at, duration). Newest first, like
+            # episodes below. Live only - see _on_motion_state.
+            "motion_windows": ([
+                {"t": w["sample_t"], "duration": w["duration"],
+                 "at": datetime.fromtimestamp(w["end"]).strftime("%H:%M:%S")}
+                for w in reversed(list(_motion_windows)[-20:])
+            ] if _run_mode == "live" else []),
+            # Live only: a beat the model is not confident enough about to
+            # report is shown as NOR rather than as a faded guess. See the
+            # comment in app.js draw() for why that is consistency rather
+            # than whitewashing. Demo replay keeps the faded "?" labels
+            # exactly as they were.
+            "unconfident_as_nor": _run_mode == "live",
+            "demo_records": DEMO_RECORDS,
             "wave": [round(float(v), 2) for v in tail.tolist()],
             "beats": beats[-60:],
             "episodes": list(reversed(episodes)),
@@ -302,7 +672,7 @@ class DashboardState:
 # The one analysis loop - identical for selftest and live
 # --------------------------------------------------------------------------
 def run_loop(read, stream, writer, fs, stop_event=None, dashboard=None,
-            truth_lookup=None):
+            truth_lookup=None, episode_gate=None):
     """
     Pull from `read()` until it returns None (selftest: end of file) or
     `stop_event` is set (live: shutdown requested). Everything about how a
@@ -312,6 +682,13 @@ def run_loop(read, stream, writer, fs, stop_event=None, dashboard=None,
     `dashboard`, if given, is fed every new beat and finalised episode so
     the web page can show the same thing this function is doing - it never
     changes what gets classified or logged, only what gets displayed.
+
+    `episode_gate` is the minimum mean confidence an episode needs before it
+    is reported at all. None keeps the per-class MIT-BIH-tuned map, which is
+    right for selftest/demo replay of database signal. Live mode passes
+    C.LIVE_MIN_EPISODE_CONFIDENCE instead - see that constant for the
+    measurements behind it. Same analysis code either way; only the
+    reporting threshold differs, because the input domain differs.
 
     `truth_lookup(sample) -> str|None` is selftest-only: the MIT-BIH
     annotation for a beat, shown on the dashboard next to the model's own
@@ -326,8 +703,19 @@ def run_loop(read, stream, writer, fs, stop_event=None, dashboard=None,
     beats, reported = [], set()
     n, last_status = 0, time.time()
     compute_s = 0.0
+    generation = _stream_generation
 
     while stop_event is None or not stop_event.is_set():
+        # A demo start/stop invalidates everything accumulated so far.
+        # StreamAnalyzer and DashboardState are cleared by the caller; these
+        # locals are ours to clear, and without doing so the sample counter
+        # would snap straight back to its pre-reset value and beats from two
+        # different sources could be grouped into one episode.
+        if _stream_generation != generation:
+            generation = _stream_generation
+            beats, reported = [], set()
+            n = 0
+
         chunk = read()
         if chunk is None:
             break
@@ -335,19 +723,82 @@ def run_loop(read, stream, writer, fs, stop_event=None, dashboard=None,
             time.sleep(0.005)
             continue
 
+        # Demo replay feeds the same queue a real Bridge push does, so this
+        # loop cannot otherwise tell a demo-generated episode from a real
+        # one. Two things follow from which source is active, so decide once
+        # here, before the beats are grouped:
+        #
+        #  * which confidence gate applies. episode_gate is the strict
+        #    live-input gate; demo replay is MIT-BIH database signal, the
+        #    exact domain the per-class map in config was measured on, so
+        #    applying the live gate to it would suppress real findings
+        #    (LBBB and AFIB sit below it by design - see
+        #    MIN_EPISODE_CONFIDENCE).
+        #  * whether it reaches detections.csv. That file should only ever
+        #    hold genuine sensor detections, so demo episodes are printed
+        #    and displayed - clearly tagged - but never written.
+        demo_active = _demo_active()
+        demo_record_id = (dashboard.demo_record
+                          if demo_active and dashboard is not None else "")
+        tag = "[DEMO] " if demo_active else ""
+        gate_now = None if demo_active else episode_gate
+        # Sustained rhythms finalise in smaller slices during a demo so the
+        # table fills while someone is watching - see DEMO_MAX_EPISODE_S.
+        chunk_now = C.DEMO_MAX_EPISODE_S if demo_active else None
+
         n += len(chunk)
         _t = time.perf_counter()
         new_beats = stream.push(chunk)
         beats.extend(new_beats)
         if len(beats) > 400:
             beats = beats[-400:]
-        episodes_now = group_episodes(beats)
+        episodes_now = group_episodes(beats, min_confidence=gate_now,
+                                      max_episode_s=chunk_now)
         compute_s += time.perf_counter() - _t
 
         if dashboard is not None:
+            # The initial "waiting for the MCU sketch..." placeholder is set
+            # once before this loop starts and is otherwise never touched -
+            # without this, the label stays stuck at "waiting" forever even
+            # once real batches are flowing, which reads as broken when it
+            # is not (samples_seen/beats/episodes below all update fine
+            # regardless - only this text lagged behind).
+            if (_run_mode == "live"
+                    and dashboard.status == "waiting for the MCU sketch..."):
+                dashboard.status = "LIVE - receiving ECG data"
+            # Until 12 R-peaks (RR_LOCAL_WINDOW + 2) are in the buffer,
+            # analyse() returns NO beats at all - the rhythm-feature branch
+            # of the model has no RR history to work from yet. So the first
+            # ~10 s of any run (or any run restarted by a demo start/stop)
+            # draws a waveform with zero markers, which looks exactly like
+            # the model ignoring obvious beats. Say so instead.
+            if not stream.emitted:
+                dashboard.warmup_note = (
+                    f"warming up - the model needs {C.RR_LOCAL_WINDOW + 2} "
+                    f"beats of rhythm history before it can classify, so "
+                    f"beats in the first few seconds stay unlabelled")
+            else:
+                dashboard.warmup_note = ""
             dashboard.samples_seen = n
             for b in new_beats:
                 dashboard.push_beat(b)
+
+        # Motion windows are written from here rather than from the Bridge
+        # callback so that exactly one thread ever touches `writer`. They
+        # get source=MOTION and condition=MOTION, so a movement can never
+        # be read back as a cardiac finding - it is the opposite, a record
+        # of when the MCU refused to supply cardiac data at all.
+        while True:
+            try:
+                w = _motion_log.get_nowait()
+            except queue.Empty:
+                break
+            writer.writerow([
+                datetime.fromtimestamp(w["start"]).strftime(
+                    "%Y-%m-%d %H:%M:%S"),
+                "MOTION", "MOTION", "", "", w["duration"], "", "", "",
+                "ECG paused by MCU - movement above threshold"])
+            print("  [MOTION] logged %.1fs pause" % w["duration"], flush=True)
 
         for e in episodes_now:
             key = (e.label, int(e.start_sample))
@@ -359,12 +810,19 @@ def run_loop(read, stream, writer, fs, stop_event=None, dashboard=None,
             reported.add(key)
             flag = "low confidence" if e.low_confidence else ""
             truth = truth_lookup(e.start_sample) if truth_lookup else ""
+            # Demo episodes ARE logged, but the `source` column says DEMO
+            # so a replay of a database patient can never be read back as a
+            # real sensor detection. Silently dropping them made the CSV
+            # look broken during a demo, which is worse than logging them
+            # honestly labelled.
             writer.writerow([
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"), e.label,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                (f"DEMO:{demo_record_id}" if demo_active else "LIVE"),
+                e.label,
                 round(e.start_time, 2), round(e.end_time, 2),
                 round(e.duration, 2), e.n_beats, round(e.mean_hr, 1),
                 round(e.mean_confidence, 3), flag])
-            print(f"  {e.label:<5} {e.start_time:7.2f}s  "
+            print(f"  {tag}{e.label:<5} {e.start_time:7.2f}s  "
                   f"{e.n_beats:>2} beat(s)  HR {e.mean_hr:5.1f}  "
                   f"conf {e.mean_confidence:.2f} {flag}", flush=True)
             if dashboard is not None:
@@ -622,12 +1080,18 @@ def main():
     # is. That should be live monitoring, not a self-test replay. Run
     # selftest explicitly with --mode selftest from a terminal instead.
     ap.add_argument("--mode", choices=["selftest", "live"], default="live")
-    ap.add_argument("--fs", type=int, default=MCU_SAMPLE_RATE)
+    # No static default: selftest's bundled capture and live's real Bridge
+    # data are at different rates (250 Hz vs 125 Hz) - pick the right one
+    # for whichever mode actually ran, below, unless the caller overrides it.
+    ap.add_argument("--fs", type=int, default=None)
     ap.add_argument("--out", default=str(APP_ROOT / "detections.csv"))
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--port", type=int, default=DASHBOARD_PORT)
     ap.add_argument("--no-dashboard", action="store_true")
     args = ap.parse_args()
+    if args.fs is None:
+        args.fs = (SELFTEST_SAMPLE_RATE if args.mode == "selftest"
+                   else MCU_SAMPLE_RATE)
 
     os.environ.setdefault("OMP_NUM_THREADS", str(args.threads))
 
@@ -650,8 +1114,8 @@ def main():
     fh = open(out_path, "a", newline="", buffering=1)
     writer = csv.writer(fh)
     if new_file:
-        writer.writerow(["logged_at", "condition", "start_s", "end_s",
-                         "duration_s", "n_beats", "mean_hr_bpm",
+        writer.writerow(["logged_at", "source", "condition", "start_s",
+                         "end_s", "duration_s", "n_beats", "mean_hr_bpm",
                          "confidence", "flag"])
 
     print(f"detections ->     {out_path}", flush=True)
@@ -703,6 +1167,11 @@ def main():
             from arduino.app_utils import App, Bridge
 
             Bridge.provide("ecg_batch", _on_ecg_batch)
+            # The sketch has been notifying this since the day it was
+            # copied in; nothing was listening, so every movement the
+            # MPU6050 caught was discarded here.
+            Bridge.provide("motion_state",
+                           lambda v: _on_motion_state(v, stream))
             print(f"mode              LIVE via MCU Bridge  "
                   f"(key 'ecg_batch', {MCU_SAMPLE_RATE} Hz, raw ADC)",
                   flush=True)
@@ -710,8 +1179,12 @@ def main():
                   f"pushing batches ...", flush=True)
             print("-" * 66, flush=True)
             if dashboard is not None:
-                dashboard.status = "waiting for the MCU sketch..."
-                dashboard.source_desc = "LIVE via BioAmp EXG Pill / MCU Bridge"
+                # Start idle. Nothing is analysed until someone presses
+                # Live Sensor or Demo Replay - see _run_mode.
+                dashboard.status = ("IDLE - choose Live Sensor or "
+                                    "Demo Replay to start")
+                dashboard.source_desc = "nothing running"
+                dashboard.gates = {c: 0.0 for c in C.CLASSES}
 
             # "Start Demo Replay" button on the dashboard - only meaningful
             # when the real WebUI Brick is in use (`via` is the real object,
@@ -720,19 +1193,39 @@ def main():
             # start_dashboard() because it needs _on_ecg_batch's queue,
             # which is specific to live mode.
             if hasattr(via, "on_message"):
+                def _record_of(data):
+                    # The browser sends {"record": "214"}; tolerate a bare
+                    # string, and fall back to the default on anything else
+                    # rather than letting a malformed message kill the demo.
+                    if isinstance(data, dict):
+                        return data.get("record")
+                    if isinstance(data, str):
+                        return data
+                    return None
+
                 via.on_message("start_demo",
                                lambda client, data=None:
-                               start_demo_replay(dashboard))
+                               start_demo_replay(dashboard, stream,
+                                                 _record_of(data)))
+                via.on_message("start_live",
+                               lambda client, data=None:
+                               start_live_capture(dashboard, stream))
+                via.on_message("stop_all",
+                               lambda client, data=None:
+                               stop_capture(dashboard, stream))
+                # Older page builds only knew "stop_demo"; it now lands in
+                # idle like the Stop button rather than starting live.
                 via.on_message("stop_demo",
                                lambda client, data=None:
-                               stop_demo_replay(dashboard))
+                               stop_capture(dashboard, stream))
 
             stop_event = threading.Event()
 
             def _worker():
                 n, reported, compute_s = run_loop(
                     read_bridge_batch, stream, writer, args.fs,
-                    stop_event=stop_event, dashboard=dashboard)
+                    stop_event=stop_event, dashboard=dashboard,
+                    episode_gate=C.LIVE_MIN_EPISODE_CONFIDENCE)
                 result.update(n=n, reported=reported, compute_s=compute_s)
 
             worker = threading.Thread(target=_worker, daemon=True)

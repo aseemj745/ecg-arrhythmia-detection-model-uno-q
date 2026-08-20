@@ -10,19 +10,54 @@
   h1 { font-size:16px; margin:0 0 4px; }
   #status { font-size:12.5px; color:#9aa4b2; }
   #status b { color:#e6e6e6; }
+  #warmup { font-size:12px; color:#fbbf24; margin-top:4px; }
+  /* Motion banner. Deliberately loud: while it shows, the MCU is sending
+     no ECG at all, so the trace is frozen - without saying so the page
+     looks hung. */
+  #motion { font-size:12.5px; font-weight:600; color:#fecaca;
+            background:#7f1d1d; border-radius:5px; padding:4px 10px;
+            margin-top:6px; display:none; }
+  /* Episodes (left) and the live-only Motion Log (right), side by side so
+     "arrhythmia found" and "why part of the trace has gaps" read as two
+     related but distinct logs rather than one table doing both jobs. */
+  .tables { display:flex; gap:16px; margin-top:14px; flex-wrap:wrap; }
+  .tables > div { flex:1 1 320px; min-width:280px; }
+  .tables table { margin-top:0; }
+  #motionpanel { display:none; }
+  #motionpanel h3, .tables h3 { font-size:11.5px; color:#9aa4b2;
+    text-transform:uppercase; letter-spacing:.04em; font-weight:600;
+    margin:0 0 6px; }
+  #motionempty { color:#6b7280; padding:10px 0; font-size:12.5px; }
   .badge { display:inline-block; padding:1px 8px; border-radius:10px;
            font-size:11px; font-weight:600; margin-left:6px; }
   .b-live { background:#7f1d1d; color:#fecaca; }
   .b-selftest { background:#1e3a5f; color:#bfdbfe; }
   .b-demo { background:#78350f; color:#fed7aa; }
   main { padding:16px 20px; max-width:1100px; margin:0 auto; }
-  .demobar { margin:10px 0 0; }
-  button.demo { background:#2b6cb0; color:#fff; border:0; padding:7px 14px;
-                border-radius:6px; font-size:12.5px; font-weight:600; cursor:pointer; }
-  button.demo.stop { background:#7f1d1d; }
-  button.demo:disabled { opacity:.5; cursor:default; }
-  .hint { color:#6b7280; font-size:11.5px; margin-left:10px; }
-  canvas { width:100%; height:260px; background:#0b0d12; border:1px solid #262b38;
+  .demobar { margin:10px 0 0; display:flex; align-items:center;
+             gap:8px; flex-wrap:wrap; }
+  .sellabel { color:#9aa4b2; font-size:11.5px; text-transform:uppercase;
+              letter-spacing:.04em; font-weight:600; }
+  select { background:#0b0d12; color:#e6e6e6; border:1px solid #2f3646;
+           border-radius:6px; padding:6px 9px; font-size:12.5px;
+           font-family:inherit; min-width:330px; }
+  select:disabled { opacity:.5; }
+  /* Start / Start / Stop, like the desktop GUI: nothing runs until you
+     pick one, and Stop returns to idle so the record can be changed
+     without passing through live mode. The RUNNING button is filled and
+     un-clickable; Stop is the only way out of a running mode. */
+  button.mode { background:transparent; color:#9aa4b2; border:1px solid #2f3646;
+                padding:7px 14px; border-radius:6px; font-size:12.5px;
+                font-weight:600; cursor:pointer; font-family:inherit; }
+  button.mode:hover:not(:disabled):not(.active) { border-color:#4b5563; color:#e6e6e6; }
+  button.mode.active { background:#2b6cb0; border-color:#2b6cb0; color:#fff;
+                       cursor:default; }
+  button.mode#liveBtn.active { background:#7f1d1d; border-color:#7f1d1d; }
+  button.mode#stopBtn:not(:disabled) { border-color:#7f1d1d; color:#fca5a5; }
+  button.mode#stopBtn:hover:not(:disabled) { background:#7f1d1d; color:#fff; }
+  button.mode:disabled:not(.active) { opacity:.4; cursor:default; }
+  .hint { color:#6b7280; font-size:11.5px; flex-basis:100%; }
+  canvas { width:100%; height:300px; background:#0b0d12; border:1px solid #262b38;
            border-radius:8px; display:block; }
   table { width:100%; border-collapse:collapse; margin-top:14px; font-size:13px; }
   th,td { text-align:left; padding:6px 10px; border-bottom:1px solid #20242e; }
@@ -38,21 +73,44 @@
 <header>
   <h1>ECG Arrhythmia Classifier<span id="modebadge" class="badge"></span></h1>
   <div id="status">connecting ...</div>
+  <div id="warmup" style="display:none"></div>
+  <div id="motion"></div>
   <div class="demobar">
-    <button id="demoBtn" class="demo" disabled>Start Demo Replay</button>
-    <span class="hint">No sensor attached yet? Replays a real, held-out
-      MIT-BIH patient so you can see the dashboard work right now - always
-      clearly labelled, never shown as live sensor data.</span>
+    <button id="liveBtn" class="mode" disabled>Live Sensor</button>
+    <button id="demoBtn" class="mode" disabled>Demo Replay</button>
+    <button id="stopBtn" class="mode" disabled>Stop</button>
+    <label for="recordSel" class="sellabel">Record</label>
+    <select id="recordSel"></select>
+    <div class="hint" id="recordNote">Replays a real, held-out MIT-BIH
+      patient - a patient the model never trained on - so the detections you
+      see are genuine. Always clearly labelled, never shown as live sensor
+      data.</div>
   </div>
 </header>
 <main>
   <canvas id="wave" width="1000" height="260"></canvas>
-  <table>
-    <thead><tr><th>Class</th><th>Time</th><th>Beats</th><th>HR</th>
-      <th>Confidence</th><th>Annotated</th></tr></thead>
-    <tbody id="episodes"></tbody>
-  </table>
-  <div id="empty" style="display:none">No arrhythmia episodes detected yet.</div>
+  <div class="tables">
+    <div>
+      <h3>Arrhythmia episodes</h3>
+      <table>
+        <thead><tr><th>Class</th><th>Time</th><th>Beats</th><th>HR</th>
+          <th>Confidence</th><th>Annotated</th></tr></thead>
+        <tbody id="episodes"></tbody>
+      </table>
+      <div id="empty" style="display:none">No arrhythmia episodes detected yet.</div>
+    </div>
+    <!-- Live sensor only. A demo replay is a file - nothing is attached
+         to anybody, so a movement log makes no sense there and this whole
+         panel is hidden rather than shown empty. -->
+    <div id="motionpanel">
+      <h3>Motion log</h3>
+      <table>
+        <thead><tr><th>Time</th><th>Duration</th></tr></thead>
+        <tbody id="motionrows"></tbody>
+      </table>
+      <div id="motionempty">No movement detected yet.</div>
+    </div>
+  </div>
 </main>
 <footer>Rendering happens in this browser; every number above is computed on
   the Arduino UNO Q that served this page, pushed live over the App Lab

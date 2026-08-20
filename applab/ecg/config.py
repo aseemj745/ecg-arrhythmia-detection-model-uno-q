@@ -160,7 +160,13 @@ DEMO_ARRHYTHMIA = [
     # record, headline class, fold, note
     ('214', 'LBBB', 'test', '1992 LBBB + 255 PVC'),
     ('231', 'RBBB', 'test', '1242 RBBB, sustained throughout'),
-    ('232', 'RBBB', 'test', 'RBBB plus many atrial beats we do not model'),
+    # 232 removed from the demo list. Most of its beats are atrial
+    # (symbols 'A'/'a'), a class this model does not have, so the
+    # dashboard spends the clip labelling them as whatever of the five
+    # they resemble - it demonstrates a gap in the class set rather
+    # than the model's RBBB detection, which 231 shows cleanly.
+    # It REMAINS in TEST_RECORDS, so it still counts against the
+    # reported test metrics; it is only no longer offered as a demo.
     ('119', 'PVC',  'test', '442 PVC in bigeminy - clean, regular pattern'),
     ('233', 'PVC',  'test', '826 PVC, 28% burden - the hard case'),
     ('221', 'AFIB', 'test', '2346 AFib beats, sustained'),
@@ -276,9 +282,44 @@ MIN_EPISODE_CONFIDENCE = {
     "AFIB": 0.0,
 }
 
+# Single stricter gate applied to EVERY class when the input is a live
+# sensor rather than the database. The per-class map above was measured on
+# MIT-BIH validation patients, where the model is well separated (mean
+# confidence 0.71) and gating LBBB/AFIB actively hurts. Live BioAmp input is
+# a different regime: measured mean confidence ~0.40 against a 0.20 chance
+# level, because beat-to-beat morphology is ~2.5x more variable than MIT-BIH
+# (std 0.28 vs 0.11) once real electrode noise, contact drift and movement
+# are present. Ungated, that near-chance output reaches the dashboard as
+# findings - a healthy resting subject produced 5 false AFIB/PVC episodes.
+#
+# Measured on a real 23.6 s BioAmp capture from a healthy resting subject
+# vs MIT-BIH record 119 (24 genuine PVC episodes):
+#   gate 0.00 (per-class map) -> 5 false live episodes, 24/24 PVC kept
+#   gate 0.55                 -> 0 false live episodes, 24/24 PVC kept
+#   gate 0.65                 -> 0 false live episodes, 23/24 PVC kept
+# 0.55 is the operating point: it removes every false positive measured
+# while still costing no genuine detection.
+#
+# This is an alerting threshold, not a model change. It does not make the
+# model better on noisy input - it makes it decline to guess. The real fix
+# for live accuracy is signal quality (electrode contact, shielding) and
+# eventually training on live-domain data.
+LIVE_MIN_EPISODE_CONFIDENCE = 0.55
+
 # A sustained arrhythmia is chopped into chunks of at most this many seconds.
 # Without it, a patient who is in RBBB or AFib for the whole recording
 # produces one episode that never ends, so it is never finalised, never
 # logged and never shaded - the single most important case silently produces
 # nothing. Chunking also keeps the Excel log to a readable number of rows.
 MAX_EPISODE_S = 30.0
+
+# Same idea, but for the on-device demo replay. A sustained-rhythm record
+# (231 is RBBB throughout, 221 is AFib throughout) is ONE continuous run, so
+# at 30 s chunks a 90 s replay produces about three rows and the first one
+# only lands after 30 s of watching. That reads as "RBBB is not logging"
+# when the model is in fact calling every beat correctly - the episode just
+# has not finalised yet. 10 s chunks give roughly nine rows over the same
+# replay and the first within ten seconds, which is what makes the demo
+# legible. Purely a reporting granularity: it changes how a run is sliced
+# for display, never which beats are detected or what they are called.
+DEMO_MAX_EPISODE_S = 10.0

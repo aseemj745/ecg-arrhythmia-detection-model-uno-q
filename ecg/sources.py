@@ -161,7 +161,7 @@ class SerialSource(SignalSource):
     to change.
     """
 
-    def __init__(self, port, baud=115200, fs=250, timeout=0.05,
+    def __init__(self, port, baud=115200, fs=125, timeout=0.05,
                  adc_bits=None, vref=None):
         self.port = port
         self.baud = baud

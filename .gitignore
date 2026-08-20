@@ -45,3 +45,7 @@ artifacts/capture_119_250hz.csv
 # The handful of figures actually referenced from README.md are copied into
 # docs/images/ instead; this excludes the rest of the raw dump.
 plots/
+
+# One-off analysis figures generated at the repo root - same deal as plots/
+# above, the canonical copy lives in docs/images/.
+/beat_comparison.png

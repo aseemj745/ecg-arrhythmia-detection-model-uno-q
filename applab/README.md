@@ -13,7 +13,13 @@ this as a zip.
 python/main.py              entry point (self-test + live modes)
 ecg/                        copy of the shared library (kept in sync with the root ecg/)
 models/model_int8.onnx      the deployed model
+sketch/sketch.ino           MCU-side (STM32) sketch: samples the BioAmp EXG Pill at 125Hz,
+                             bandpass-filters it, pushes batches over the Bridge, and does
+                             MPU6050 motion gating. Started from a teammate's already-working
+                             app rather than written from scratch.
 data/sample_ecg_250hz.csv   90s of MIT-BIH record 119 @ 250Hz, for the no-hardware self-test
+data/demo_*.csv             8 test-fold records (one per class + a couple of hard cases),
+                             for the dashboard's "Demo Replay" record picker
 wheels/                     offline aarch64 wheels, in case the board has no internet
 install_deps.sh             offline dependency install
 ```
@@ -71,12 +77,16 @@ Arduino's own examples use to get a port actually published, and it's
 confirmed working: page loads, live waveform updates, episode table fills
 in as beats are classified.
 
-There's also a **"Start Demo Replay" button** on the dashboard. Since
-`apps_start` always launches live mode, and there's no point showing an
-empty dashboard while waiting for a sensor, this button feeds the bundled
-MIT-BIH recording into the exact same code path a real sensor would use.
+The dashboard has three controls: **Live Sensor**, **Demo Replay**, and
+**Stop**. Demo Replay feeds one of the 8 bundled test-fold recordings
+(picked from a dropdown) into the exact same code path a real sensor push
+would use, so it's a genuine test of the classifier, just not of the sensor.
 While it's running, the dashboard clearly labels it `DEMO REPLAY — NOT a
-live sensor`, so it's never confused with an actual reading.
+live sensor`, so it's never confused with an actual reading. There's also a
+motion log: the MCU sketch edge-triggers a `motion_state` Bridge event
+whenever its MPU6050 sees a sudden displacement, and the dashboard marks
+those spans on the waveform instead of showing whatever garbage the
+electrodes picked up while the patient moved.
 
 ## Known limitations
 

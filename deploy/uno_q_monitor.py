@@ -4,13 +4,15 @@ Headless arrhythmia monitor for the Arduino UNO Q (QRB2210 Linux side).
 This is the on-device counterpart of gui_app.py. No GUI, no matplotlib, no
 PyTorch, no wfdb - just numpy, scipy and onnxruntime reading the INT8 model.
 
-    # from the STM32 bridge over serial
-    python3 uno_q_monitor.py --serial /dev/ttyACM0 --fs 250
+    # from the STM32 bridge over serial (125 Hz - confirmed empirically from
+    # a real BioAmp EXG Pill capture's own timestamps, 2026-08-20)
+    python3 uno_q_monitor.py --serial /dev/ttyACM0 --fs 125
 
     # from a bridge script that prints samples to stdout
-    python3 /app/python/adc_reader_uno_q_bridge.py | python3 uno_q_monitor.py --stdin --fs 250
+    python3 /app/python/adc_reader_uno_q_bridge.py | python3 uno_q_monitor.py --stdin --fs 125
 
-    # replay a captured CSV, to prove the board works with no sensor attached
+    # replay a captured CSV of the bundled MIT-BIH self-test data, which is
+    # genuinely resampled to 250 Hz (unrelated to the live rate above)
     python3 uno_q_monitor.py --csv capture.csv --fs 250
 
 Every detected episode is appended to a CSV immediately (line-buffered, so a
@@ -98,8 +100,11 @@ def main():
     src.add_argument("--csv", help="replay a captured CSV")
 
     ap.add_argument("--baud", type=int, default=115200)
-    ap.add_argument("--fs", type=int, default=250,
-                    help="sample rate of the INPUT; resampled to 360 Hz")
+    ap.add_argument("--fs", type=int, default=125,
+                    help="sample rate of the INPUT; resampled to 360 Hz. "
+                         "125 is the confirmed real MCU rate for --serial/"
+                         "--stdin; the bundled --csv self-test data is 250,"
+                         " pass --fs 250 explicitly when using it")
     ap.add_argument("--csv-column", type=int, default=0)
     ap.add_argument("--skip-rows", type=int, default=0)
     ap.add_argument("--out", default="detections.csv")

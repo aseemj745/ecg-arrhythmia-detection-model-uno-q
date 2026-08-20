@@ -8,13 +8,16 @@ Some specifics (exact device paths, the App Lab menu wording, the default
 username) depend on your board image and are flagged with **VERIFY** — check
 them on your actual hardware rather than trusting this document.
 
-> **Known issue — sample rate.** Every `--fs 250` / "250 Hz" reference below
-> assumes the MCU sketch samples at 250 Hz. That was true for two of the
-> reference sketches used during development, but the most advanced one
-> actually samples at **125 Hz** (check its `FS_HZ` constant — don't trust
-> comments, they're stale). **Confirm the real rate from your own sketch
-> before trusting any `--fs` value here** — a wrong rate doesn't crash
-> anything, it just silently scales every heart rate and RR interval.
+> **Fixed 2026-08-20 — sample rate.** The live/serial/stdin commands below
+> now use `--fs 125`. A real BioAmp EXG Pill capture's own timestamps
+> measured 124.96 Hz empirically (2950 samples over 23.60 real seconds),
+> confirming the MCU sketch actually in use samples at 125 Hz (its `FS_HZ`
+> constant, not the stale comments around it). This used to default to
+> 250 Hz, which was true for two earlier reference sketches but not this
+> one — every heart rate and RR interval was coming out exactly 2x too
+> fast. The `--csv capture.csv --fs 250` self-test example is unaffected:
+> that capture is genuinely resampled to 250 Hz on purpose and is unrelated
+> to the live sensor rate.
 
 ---
 
@@ -51,9 +54,10 @@ python package_applab.py
 
 That writes `artifacts/ecg_arrhythmia_unoq.zip` (~154 KB), containing the
 INT8 model, the `ecg` package, `python/main.py`, and a **90-second recording
-of held-out MIT-BIH record 119 resampled to 250 Hz** — the same rate the MCU
-sketch samples A0 at. So the app can prove itself with no sensor and no
-electrodes attached.
+of held-out MIT-BIH record 119 resampled to 250 Hz** — its own native rate,
+independent of the MCU (which samples at 125 Hz; see the fixed-issue note
+above). So the app can prove itself with no sensor and no electrodes
+attached.
 
 1. App Lab → **Create new app +** → **Import an App** → **Import from
    computer** → pick the zip.
@@ -223,10 +227,10 @@ Once the bridge is streaming, pick whichever matches your setup:
 
 ```bash
 # the bridge exposes a serial device
-python3 deploy/uno_q_monitor.py --serial /dev/ttyACM0 --fs 250 --out detections.csv
+python3 deploy/uno_q_monitor.py --serial /dev/ttyACM0 --fs 125 --out detections.csv
 
 # the bridge prints samples to stdout
-python3 /app/python/adc_reader_uno_q_bridge.py | python3 deploy/uno_q_monitor.py --stdin --fs 250
+python3 /app/python/adc_reader_uno_q_bridge.py | python3 deploy/uno_q_monitor.py --stdin --fs 125
 ```
 
 **VERIFY** two things against the real bridge:
@@ -234,11 +238,12 @@ python3 /app/python/adc_reader_uno_q_bridge.py | python3 deploy/uno_q_monitor.py
 1. **The device path.** `ls /dev/tty*` before and after the STM32 starts
    streaming; the new entry is yours. It may be `/dev/ttyACM0`, `/dev/ttyUSB0`
    or `/dev/ttySx`.
-2. **The sample rate.** `--fs` must match what the bridge actually sends —
-   your friend's dashboard showed 250 Hz. If this is wrong, everything still
-   *runs*, but every heart rate and duration will be scaled by the ratio, and
-   the rhythm features will be silently wrong. This is the single most
-   likely thing to get wrong.
+2. **The sample rate.** `--fs 125` is confirmed correct for the sketch in
+   use (measured empirically from a real capture's own timestamps,
+   2026-08-20) — but if you swap in a different sketch, re-verify against
+   its `FS_HZ` constant. A wrong rate doesn't crash anything, it just
+   silently scales every heart rate and duration, and the rhythm features
+   go silently wrong. This is the single most likely thing to get wrong.
 
 The parser accepts one number per line and ignores anything it cannot parse,
 so banner text and status lines are harmless. If the bridge emits CSV with
@@ -258,7 +263,7 @@ After=multi-user.target
 Type=simple
 User=%i
 WorkingDirectory=/home/<user>/ecg_unoq
-ExecStart=/usr/bin/python3 deploy/uno_q_monitor.py --serial /dev/ttyACM0 --fs 250 --out /home/<user>/detections.csv
+ExecStart=/usr/bin/python3 deploy/uno_q_monitor.py --serial /dev/ttyACM0 --fs 125 --out /home/<user>/detections.csv
 Restart=on-failure
 RestartSec=5
 

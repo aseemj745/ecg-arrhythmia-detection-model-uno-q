@@ -1,0 +1,74 @@
+[
+  {
+    "record": "234",
+    "condition": "NOR",
+    "note": "2689 normal vs 3 ectopic - essentially clean",
+    "file": "demo_234.csv",
+    "fs": 250,
+    "seconds": 90,
+    "start_s": 0
+  },
+  {
+    "record": "114",
+    "condition": "NOR",
+    "note": "97.7% normal; also the MLII-in-channel-1 record",
+    "file": "demo_114.csv",
+    "fs": 250,
+    "seconds": 90,
+    "start_s": 0
+  },
+  {
+    "record": "214",
+    "condition": "LBBB",
+    "note": "1992 LBBB + 255 PVC",
+    "file": "demo_214.csv",
+    "fs": 250,
+    "seconds": 90,
+    "start_s": 0
+  },
+  {
+    "record": "231",
+    "condition": "RBBB",
+    "note": "1242 RBBB, sustained throughout",
+    "file": "demo_231.csv",
+    "fs": 250,
+    "seconds": 90,
+    "start_s": 0
+  },
+  {
+    "record": "119",
+    "condition": "PVC",
+    "note": "442 PVC in bigeminy - clean, regular pattern",
+    "file": "demo_119.csv",
+    "fs": 250,
+    "seconds": 90,
+    "start_s": 0
+  },
+  {
+    "record": "233",
+    "condition": "PVC",
+    "note": "826 PVC, 28% burden - the hard case",
+    "file": "demo_233.csv",
+    "fs": 250,
+    "seconds": 90,
+    "start_s": 0
+  },
+  {
+    "record": "221",
+    "condition": "AFIB",
+    "note": "2346 AFib beats, sustained",
+    "file": "demo_221.csv",
+    "fs": 250,
+    "seconds": 90,
+    "start_s": 0
+  },
+  {
+    "record": "202",
+    "condition": "AFIB",
+    "note": "sustained AFib run (the record alternates AFib and normal)",
+    "file": "demo_202.csv",
+    "fs": 250,
+    "seconds": 90,
+    "start_s": 1380
+  }
+]

@@ -51,8 +51,10 @@ class ECGAnalyzer:
     # ------------------------------------------------------------------
     @staticmethod
     def to_model_rate(sig, fs):
-        """Resample to 360 Hz. The BioAmp bridge streams 250 Hz, CPSC is 500;
-        the model only ever sees 360."""
+        """Resample to 360 Hz. The BioAmp bridge streams 125 Hz (confirmed
+        empirically from real capture timestamps, 2026-08-20 - not the
+        250 Hz originally assumed), CPSC is 500; the model only ever sees
+        360."""
         sig = np.asarray(sig, dtype=np.float64)
         if fs == C.FS:
             return sig, C.FS
@@ -261,13 +263,32 @@ class Episode:
         return self.mean_confidence < C.LOW_CONFIDENCE
 
 
-def group_episodes(beats, min_beats=None):
+def group_episodes(beats, min_beats=None, min_confidence=None,
+                   max_episode_s=None):
     """
     Collapse consecutive same-label abnormal beats into episodes.
 
     min_beats : None uses the per-class thresholds in config (PVC fires on a
                 single beat, sustained rhythms need three). Pass an int to
                 override uniformly.
+
+    min_confidence : None uses the per-class MIN_EPISODE_CONFIDENCE map,
+                which was measured on MIT-BIH VALIDATION patients and is
+                deliberately permissive (LBBB/RBBB/AFIB gate at 0.0, because
+                on clean database signal a gate there costs far more recall
+                than it buys precision).
+
+                That reasoning does NOT transfer to live sensor input. On a
+                real BioAmp capture the model's mean confidence is ~0.40 -
+                barely above the 0.20 chance level for 5 classes - because
+                the beat-to-beat morphology is ~2.5x more variable than
+                MIT-BIH (0.28 vs 0.11 std). Ungated, that near-chance output
+                is reported as findings: a healthy resting subject produced
+                5 false AFIB/PVC episodes. Pass a float here (live mode uses
+                C.LIVE_MIN_EPISODE_CONFIDENCE) to apply one stricter gate to
+                every class. Measured: at 0.55 those 5 false episodes drop to
+                0 while all 24 genuine PVC episodes in MIT-BIH record 119 are
+                still reported, so this costs no measurable real recall.
     """
     episodes, run = [], []
 
@@ -279,7 +300,8 @@ def group_episodes(beats, min_beats=None):
     def flush():
         if run and len(run) >= threshold(run[0].label):
             conf = float(np.mean([b.confidence for b in run]))
-            gate = C.MIN_EPISODE_CONFIDENCE.get(run[0].label, 0.0)
+            gate = (min_confidence if min_confidence is not None
+                    else C.MIN_EPISODE_CONFIDENCE.get(run[0].label, 0.0))
             if conf < gate:
                 run.clear()
                 return
@@ -296,10 +318,12 @@ def group_episodes(beats, min_beats=None):
             ))
         run.clear()
 
+    chunk_s = max_episode_s if max_episode_s is not None else C.MAX_EPISODE_S
+
     for b in beats:
         same = run and b.label == run[0].label
         # Split a long sustained run so it finalises in bounded chunks.
-        too_long = same and (b.time_s - run[0].time_s) >= C.MAX_EPISODE_S
+        too_long = same and (b.time_s - run[0].time_s) >= chunk_s
         if b.is_abnormal and same and not too_long:
             run.append(b)
         else:

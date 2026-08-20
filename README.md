@@ -13,16 +13,20 @@ from a single MLII-equivalent lead, trained on MIT-BIH and exported to a
 | ML pipeline (train / quantize / evaluate) | Done — macro F1 0.757, see [Results](#results-held-out-patients-int8-onnx) below |
 | Desktop demo GUI | Done — dual waveform, test-fold-only enforced by an automated guard |
 | On-device deployment (Arduino App Lab) | Done and verified — live browser dashboard, no-hardware demo replay button |
-| Live BioAmp EXG Pill sensor integration | In progress — hardware chain validated end-to-end (real ADC noise through the real Bridge pipeline); electrode test with a real signal is the current step |
+| Live BioAmp EXG Pill sensor integration | In progress — real electrode signal captured and validated (clean PQRST morphology, ~90–103 bpm, physiologically plausible RR/QRS/QT); wiring the live path into the on-device classifier is the current step |
 
-**Known limitation, not yet fixed:** the classifier assumes the MCU samples
-ECG at **250 Hz**, matching two of the reference sketches used during
-development. The sketch actually in use now samples at **125 Hz** (its
-`FS_HZ` constant says so, even though comments elsewhere in that file still
-say 250). This hasn't been fixed in the classifier yet — see
-[Honest limitations](#honest-limitations) below. Getting it wrong wouldn't
-crash anything, it would just silently scale every heart rate and RR
-interval, so treat any on-device timing numbers as unverified for now.
+**Fixed 2026-08-20:** the classifier previously assumed the MCU samples ECG
+at 250 Hz, matching two of the reference sketches used during development.
+A real BioAmp EXG Pill capture's own timestamps measured **124.96 Hz**
+empirically (2950 samples over 23.60 real seconds), confirming the sketch
+actually in use samples at 125 Hz (its `FS_HZ` constant, not the stale
+comments around it). Running the project's own Pan-Tompkins detector on
+that capture at 125 Hz gave a plausible ~103 bpm; at the old 250 Hz
+assumption it gave ~200 bpm — every downstream heart rate and RR interval
+was being computed exactly 2x too fast. `MCU_SAMPLE_RATE` in
+`applab/python/main.py` is now 125, decoupled from the bundled selftest/demo
+capture's own native 250 Hz rate (`SELFTEST_SAMPLE_RATE`), which is
+unrelated and unaffected.
 
 ### Docs
 
@@ -39,7 +43,8 @@ ecg/                  shared library — data prep, model, Pan-Tompkins QRS dete
                        the one inference pipeline used by both the desktop GUI and on-device app
 step1-4_*.py           training pipeline: build dataset -> train -> export/quantize -> evaluate
 gui_app.py             desktop demo GUI (dual waveform, Excel logging)
-applab/                the Arduino App Lab app: on-device source, live web dashboard, build script
+applab/                the Arduino App Lab app: on-device source, MCU sketch, live web
+                       dashboard, build script
 deploy/                generic headless deployment path (SSH/terminal, no App Lab) — a fallback
 data/mitdb/            MIT-BIH database (gitignored — regenerate with step1_build_dataset.py)
 artifacts/             generated dataset/model/report outputs (gitignored — regenerable)
@@ -142,18 +147,30 @@ These are stated because they affect how the numbers should be read.
 - **No claim of live arrhythmia detection from a person.** The demo runs a
   live *normal* signal from a volunteer and separately replays held-out
   MIT-BIH arrhythmia records. The GUI labels which is which.
-- **On-device sample rate doesn't match the real sensor sketch yet.**
-  `MCU_SAMPLE_RATE` in `applab/python/main.py` and the `--fs 250` examples
-  in `DEPLOY_UNO_Q.md` assume 250 Hz, which was true for two of the
-  reference sketches used during development. The sketch actually in use
-  samples at **125 Hz** (its `FS_HZ` constant, not the comments around it,
-  which are stale). Not fixed yet — a wrong rate wouldn't crash anything,
-  it would just silently scale every heart rate and RR interval, so
-  on-device timing numbers should be treated as unverified for now.
+- **On-device sample rate now matches the real sensor sketch (fixed
+  2026-08-20).** `MCU_SAMPLE_RATE` in `applab/python/main.py` was 250 Hz,
+  which was true for two of the reference sketches used during development
+  but not the one actually in use. A real BioAmp EXG Pill capture's own
+  timestamps measured 124.96 Hz empirically, matching the sketch's `FS_HZ`
+  constant; `MCU_SAMPLE_RATE` is now 125. The bundled selftest/demo capture
+  is genuinely 250 Hz (`SELFTEST_SAMPLE_RATE`, a separate constant) — the
+  demo-replay path decimates it 2:1 before feeding it into the live stream
+  so the two rates never mix.
 - **Live sensor integration is in progress, not finished.** The Bridge
   pipeline (MCU → Linux side) has been checked end-to-end with real ADC
-  samples, but classifying an actual electrode signal from the BioAmp EXG
-  Pill hasn't been confirmed working yet. See [Status](#status) above.
+  samples, and a real electrode signal (BioAmp EXG Pill) has now been
+  captured and shown to produce plausible PQRST morphology and HR once the
+  sample-rate bug above was fixed — but that validation was done offline
+  against a downloaded capture, not yet through the on-device live
+  classifier path. See [Status](#status) above.
+
+<img src="docs/images/beat_comparison_live_vs_mitbih.png" alt="Average beat shape: a real BioAmp EXG Pill capture next to MIT-BIH, aligned on the R-peak" width="700">
+
+*Left: the average beat shape the model was trained on (MIT-BIH record 100).
+Right: the average beat shape from a real BioAmp EXG Pill capture, same
+alignment. Same QRS timing, same rough T-wave shape — this is what "the
+signal path produces a real, plausible ECG" actually looks like, not just a
+claim.*
 
 ---
 

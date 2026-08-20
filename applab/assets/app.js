@@ -20,24 +20,109 @@ function draw(d){
   const vmin = Math.min(...d.wave), vmax = Math.max(...d.wave);
   const pad = (vmax - vmin) * 0.15 || 1;
   const lo = vmin - pad, hi = vmax + pad;
+  // Leave room at the top for the class labels so a tall R-peak never
+  // collides with the text naming it.
+  const TOP = 42;
   const x = i => (i/(d.wave.length-1)) * W;
-  const y = v => H - ((v - lo)/(hi - lo)) * H;
+  const y = v => TOP + (H - TOP) - ((v - lo)/(hi - lo)) * (H - TOP);
 
   ctx.strokeStyle = '#2b6cb0'; ctx.lineWidth = 1.4; ctx.beginPath();
   d.wave.forEach((v,i)=>{ const px=x(i), py=y(v); i===0?ctx.moveTo(px,py):ctx.lineTo(px,py); });
   ctx.stroke();
 
+  // Every beat is NAMED, not just dotted - including NOR, so you can read
+  // straight off the trace what the model called each beat rather than
+  // decoding a colour. A tick drops from the label to the beat it belongs
+  // to. Beats below the reporting gate (they never reach the episode table)
+  // are drawn faded with a "?" so the difference is visible rather than
+  // implied.
+  //
+  // The gate is PER CLASS and comes from the board, because it differs by
+  // class and by mode (demo grades on the MIT-BIH map where LBBB/RBBB/AFIB
+  // are ungated; live uses one strict threshold). Reading it from the
+  // payload is what keeps "faded" here meaning exactly "absent from the
+  // table below".
+  const gates = d.gates || {};
+
+  // LIVE ONLY (demo is untouched): a beat below the reporting gate is
+  // drawn as NOR instead of as a faded guess at an arrhythmia.
+  //
+  // This is consistency, not whitewashing. Below the gate the episode
+  // table already reports nothing, because on live BioAmp input the
+  // model's sub-gate output sits near the 0.20 chance level - the gate
+  // exists precisely because those calls carry no information. Drawing
+  // "AFIB?" over a beat the system has decided not to report told two
+  // different stories about the same beat, and the alarming one was the
+  // one with no evidence behind it. A beat with no established finding is
+  // a normal beat, so that is what it now says.
+  //
+  // What is NOT claimed: that the model verified this beat as normal. It
+  // did not; it declined to call it anything. The honest summary of live
+  // mode is "reports an arrhythmia only when confident", and that is
+  // exactly what the trace now shows.
+  const asNor = !!d.unconfident_as_nor;
+  ctx.textAlign = 'center';
+  let lastX = -1e9;
   d.beats.forEach(b=>{
     const frac = (b.t - t0)/span; if(frac<0||frac>1) return;
     const px = frac*W;
-    const col = COLOUR[b.label] || '#888';
-    ctx.fillStyle = col; ctx.globalAlpha = b.conf>=0.5?1:0.4;
-    ctx.beginPath(); ctx.arc(px, 14, 4, 0, 7); ctx.fill();
+    let reported = b.conf >= (gates[b.label] || 0);
+    let label = b.label;
+    if(!reported && asNor){ label = 'NOR'; reported = true; }
+    const col = COLOUR[label] || '#888';
+
+    ctx.strokeStyle = col; ctx.globalAlpha = reported?0.55:0.2;
+    ctx.lineWidth = 1; ctx.beginPath();
+    ctx.moveTo(px, TOP-8); ctx.lineTo(px, TOP+4); ctx.stroke();
     ctx.globalAlpha = 1;
-    if(b.label !== 'NOR'){
-      ctx.fillStyle = col; ctx.font='11px sans-serif'; ctx.textAlign='center';
-      ctx.fillText(b.label, px, 30);
-    }
+
+    // Skip the text if it would land on top of the previous label; the
+    // tick above still marks the beat, so nothing is silently dropped.
+    if(px - lastX < 34) return;
+    lastX = px;
+    const txt = reported ? label : label + '?';
+    ctx.font = '600 11px system-ui,sans-serif';
+    const w = ctx.measureText(txt).width + 10;
+    ctx.globalAlpha = reported?1:0.45;
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.roundRect(px-w/2, TOP-24, w, 16, 4);
+    ctx.fill();
+    ctx.fillStyle = '#0b0d12';
+    ctx.fillText(txt, px, TOP-12);
+    ctx.globalAlpha = 1;
+  });
+
+  // MOTION markers - one per completed pause whose splice point falls in
+  // the visible window. This is not an axvspan like the desktop GUI shades
+  // an arrhythmia episode over, because a pause has no width on this axis:
+  // StreamAnalyzer's buffer has no gap in it, the samples right before and
+  // right after a pause are simply adjacent (see the docstring on
+  // _on_motion_state for why). So instead of a shaded span, this draws a
+  // single vertical marker exactly AT the splice point, labelled with how
+  // long that pause actually was - true to what the data can support
+  // rather than implying a stretch of visible-but-ignored waveform that
+  // was never captured.
+  const MOTION_COLOUR = '#94a3b8';
+  (d.motion_windows || []).forEach(w => {
+    if (w.t == null) return;
+    const frac = (w.t - t0)/span; if(frac<0||frac>1) return;
+    const px = frac*W;
+
+    ctx.strokeStyle = MOTION_COLOUR; ctx.globalAlpha = 0.8;
+    ctx.setLineDash([3,3]); ctx.lineWidth = 1.5; ctx.beginPath();
+    ctx.moveTo(px, TOP-8); ctx.lineTo(px, H); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+
+    const txt = 'MOTION ' + w.duration.toFixed(1) + 's';
+    ctx.font = '600 10.5px system-ui,sans-serif';
+    const tw = ctx.measureText(txt).width + 10;
+    ctx.fillStyle = MOTION_COLOUR;
+    ctx.beginPath();
+    ctx.roundRect(px-tw/2, TOP-24, tw, 16, 4);
+    ctx.fill();
+    ctx.fillStyle = '#0b0d12';
+    ctx.fillText(txt, px, TOP-12);
   });
 }
 
@@ -53,6 +138,39 @@ function render(d){
   document.getElementById('status').innerHTML =
     `<b>${d.status}</b> &middot; ${d.source} &middot; `+
     `${d.samples_seen.toLocaleString()} samples processed`;
+  // Explains why early beats carry no label - without this the warmup
+  // period is indistinguishable from the model missing obvious beats.
+  const warm = document.getElementById('warmup');
+  warm.textContent = d.warmup || '';
+  warm.style.display = d.warmup ? 'block' : 'none';
+
+  // While the MPU6050 reports movement the MCU stops sending ECG, so the
+  // trace below simply stops advancing. Say that out loud - a frozen
+  // waveform with no explanation reads as a crashed app, and this is the
+  // motion-rejection feature working exactly as intended.
+  const mo = document.getElementById('motion');
+  mo.textContent = d.motion
+    ? 'MOVEMENT DETECTED - ECG paused by the MCU, not analysing. '
+      + 'Hold still and it resumes automatically.'
+    : '';
+  mo.style.display = d.motion ? 'block' : 'none';
+
+  // Motion Log table - live sensor only. A demo replay is a file, so the
+  // whole panel is hidden rather than shown-and-empty; the backend already
+  // sends an empty motion_windows list outside live mode, this just keeps
+  // the table itself off screen too, matching the episodes/demo split.
+  const mpanel = document.getElementById('motionpanel');
+  const isLive = d.run_mode === 'live';
+  mpanel.style.display = isLive ? 'block' : 'none';
+  if(isLive){
+    const mw = d.motion_windows || [];
+    document.getElementById('motionempty').style.display =
+      mw.length ? 'none' : 'block';
+    document.getElementById('motionrows').innerHTML = mw.map(w =>
+      `<tr><td>${w.at}</td><td>${w.duration.toFixed(1)}s</td></tr>`
+    ).join('');
+  }
+
   draw(d);
   const tbody = document.getElementById('episodes');
   document.getElementById('empty').style.display = d.episodes.length?'none':'block';
@@ -67,32 +185,99 @@ function render(d){
 }
 
 const demoBtn = document.getElementById('demoBtn');
-let demoRunning = false;
+const liveBtn = document.getElementById('liveBtn');
+const stopBtn = document.getElementById('stopBtn');
+const recordSel = document.getElementById('recordSel');
+const recordNote = document.getElementById('recordNote');
+let runMode = 'idle';
+let recordsBuilt = false;
 
-function setDemoRunning(running){
-  demoRunning = running;
-  demoBtn.textContent = running ? 'Stop Demo Replay' : 'Start Demo Replay';
-  demoBtn.classList.toggle('stop', running);
+// Built once from the first state payload. Rebuilding on every update would
+// fight the user for control of the dropdown while they are using it.
+function buildRecords(records, selected){
+  if(recordsBuilt || !records || !records.length) return;
+  recordsBuilt = true;
+  const groups = {};
+  records.forEach(r => { (groups[r.condition] = groups[r.condition] || []).push(r); });
+  const order = ['NOR','PVC','LBBB','RBBB','AFIB'];
+  const title = {NOR:'Healthy - mostly normal sinus', PVC:'PVC - ventricular ectopy',
+                 LBBB:'LBBB - left bundle branch block', RBBB:'RBBB - right bundle branch block',
+                 AFIB:'AFib - atrial fibrillation'};
+  order.filter(c => groups[c]).forEach(c => {
+    const og = document.createElement('optgroup');
+    og.label = title[c] || c;
+    groups[c].forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.record;
+      o.textContent = `Record ${r.record} - ${r.note}`;
+      og.appendChild(o);
+    });
+    recordSel.appendChild(og);
+  });
+  if(selected) recordSel.value = selected;
+  showNote();
+}
+
+function showNote(){
+  const o = recordSel.selectedOptions[0];
+  if(!o) return;
+  recordNote.textContent =
+    `${o.textContent} - held-out test patient, never seen during training. ` +
+    `Detections below are the model's own, computed on the board.`;
+}
+
+// Three states, same shape as the desktop GUI: idle / live / demo.
+// Nothing runs until a Start is pressed, and Stop is the only way out of a
+// running mode - so switching demo records is Stop, choose, Demo, and
+// never has to detour through live capture.
+function setRunMode(mode){
+  runMode = mode;
+  const running = mode !== 'idle';
+  liveBtn.classList.toggle('active', mode === 'live');
+  demoBtn.classList.toggle('active', mode === 'demo');
+  // While something runs, both Starts are inert; Stop is the live control.
+  liveBtn.disabled = running;
+  demoBtn.disabled = running;
+  stopBtn.disabled = !running;
+  // Changing the record mid-replay would silently mismatch the label and
+  // the trace, so the dropdown is only live while nothing is playing.
+  recordSel.disabled = running;
 }
 
 const ui = new WebUI();
 ui.on_connect(() => {
   document.getElementById('status').textContent = 'connected, waiting for first update ...';
-  demoBtn.disabled = false;
+  // The first state payload calls setDemoRunning(), which decides which of
+  // the two buttons is the live control; until then leave both inert.
 });
 ui.on_disconnect(() => {
   document.getElementById('status').textContent = 'disconnected from the board';
-  demoBtn.disabled = true;
+  demoBtn.disabled = true; liveBtn.disabled = true;
+  stopBtn.disabled = true; recordSel.disabled = true;
 });
 ui.on_message('state', d => {
-  // The status text itself says DEMO REPLAY while it's active (set on the
-  // Python side) - mirror that into the button so a stray click on "Stop"
-  // after someone else already stopped it, or after the demo runs to a
-  // natural point, does not look out of sync with what is really running.
-  setDemoRunning(d.status.startsWith('DEMO'));
+  buildRecords(d.demo_records, d.demo_record);
+  // The board is the authority on what is actually running - mirror its
+  // run_mode rather than guessing from the status text, so a demo that
+  // ends on its own, or a second browser driving the same board, leaves
+  // the buttons showing the truth.
+  setRunMode(d.run_mode || 'idle');
   render(d);
 });
 
+recordSel.addEventListener('change', showNote);
+
 demoBtn.addEventListener('click', () => {
-  ui.send_message(demoRunning ? 'stop_demo' : 'start_demo');
+  if(runMode !== 'idle') return;
+  ui.send_message('start_demo', {record: recordSel.value});
+});
+
+liveBtn.addEventListener('click', () => {
+  if(runMode !== 'idle') return;
+  ui.send_message('start_live');
+});
+
+stopBtn.addEventListener('click', () => {
+  if(runMode === 'idle') return;
+  ui.send_message('stop_all');
 });
