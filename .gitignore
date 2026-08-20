@@ -42,4 +42,6 @@ artifacts/reports/
 artifacts/capture_119_250hz.csv
 
 # EDA output from scripts/exploratory/ - regenerable, not pipeline output.
+# The handful of figures actually referenced from README.md are copied into
+# docs/images/ instead; this excludes the rest of the raw dump.
 plots/

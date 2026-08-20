@@ -214,6 +214,14 @@ deflection points up. MIT-BIH contains the same condition in both polarities
 and LBBB F1 went 0.017 → 0.766. It is equally valid on the device: swapping
 two electrodes inverts the trace identically.
 
+<img src="docs/images/lead_comparison.png" alt="The same three conditions viewed through two different leads, showing why waveform shape alone isn't a reliable fingerprint" width="600">
+
+*Same three conditions (normal, LBBB, RBBB), same patients, viewed through
+two different leads. The limb lead (left, what the BioAmp produces) and
+chest lead (right, what a lot of reference pictures use) don't agree on
+shape — this is why picking the lead by name instead of by channel index
+matters, and part of why polarity normalisation is needed at all.*
+
 **Causal rhythm features only.** All 10 numeric features look strictly
 backwards, computed from a 10-entry RR ring buffer, so the identical code
 runs in real time on the UNO Q with no lookahead. Three describe this beat's
@@ -222,6 +230,14 @@ ectopy-robust copies that median-replace outlier intervals. That last pair
 exists because a PVC's short-then-compensatory-long pair looks exactly like
 AFib to a plain RMSSD — without it, 93% of record 233's normal beats were
 called AFib.
+
+<img src="docs/images/afib_tachogram.png" alt="RR interval per beat, normal sinus rhythm vs atrial fibrillation" width="500"> <img src="docs/images/afib_poincare.png" alt="Poincare plot: RR interval n vs n+1, normal vs atrial fibrillation" width="500">
+
+*AFib beats can look completely normal on their own — it's the RR timing
+that gives it away. Left: RR interval beat-to-beat, regular vs jagged.
+Right: same idea as a Poincare plot, a tight cluster vs a wide smear. This
+is the entire reason the model needs the RR-feature branch, not just the
+waveform CNN — see the ablation numbers above.*
 
 **No LSTM.** On a single segmented beat there is minimal long-range temporal
 structure to exploit, and recurrence parallelises badly on a Cortex-A53. The
