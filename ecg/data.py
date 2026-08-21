@@ -168,12 +168,10 @@ def rhythm_features(window_rr, rr_prev, rr_prev2):
     prior = w[:-1]                      # window excluding the current beat
     diffs = np.diff(w)
 
-    # Ectopy-robust copy. A PVC adds a short interval and a compensatory long
-    # one, and those two outliers look just like AFib to a plain rmssd.
-    # Median-replacing anything more than ECTOPIC_TOL out flattens that pair
-    # but leaves AFib alone, since AFib is broad dispersion rather than a
-    # couple of outliers. Without this, 93% of record 233's normal beats came
-    # back as AFib.
+    # Ectopy-robust copy. A PVC gives a short interval then a compensatory long
+    # one, and to a plain rmssd that pair looks like AFib. Median-replacing the
+    # outliers flattens it but leaves AFib alone, since AFib is broad dispersion
+    # not two spikes. Without this 93% of record 233's normal beats read AFib.
     clean = np.where(np.abs(w - median) / median > C.ECTOPIC_TOL, median, w)
     clean_diffs = np.diff(clean)
 

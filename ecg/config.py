@@ -1,7 +1,4 @@
-"""
-All the fixed project decisions in one place, so the scripts stay readable and
-there is only one spot to change any choice.
-"""
+"""Project settings in one place, so there's only one spot to change anything."""
 from pathlib import Path
 
 # --------------------------------------------------------------------------
@@ -86,20 +83,12 @@ ALL_RECORDS = [
 USABLE_RECORDS = [r for r in ALL_RECORDS if r not in EXCLUDED_RECORDS]
 
 # --------------------------------------------------------------------------
-# Patient-level split  (run step1b_check_split.py to see the resulting table)
+# Patient-level split (step1b_check_split.py prints the table)
 # --------------------------------------------------------------------------
-# Never a random beat-level split. The same patient in both train and test lets
-# the model memorise that person's heartbeat instead of learning the class.
-#
-# Built rare-class-first, since so few patients carry the rare classes:
-#   LBBB is in only 4 patients (109, 111, 207, 214) -> 214 test, 109 val,
-#        111+207 train. So test LBBB rests on one patient.
-#   RBBB is in 6 (118, 124, 207, 212, 231, 232) -> 231+232 test, 118 val.
-#   AFIB is in 7 (201, 202, 203, 210, 219, 221, 222) -> 202+221 test, 219 val.
-#   NOR and PVC are spread over 30+ patients so they fill in freely.
-#
-# 114 is in test on purpose: it is the one record with MLII in channel 1, so a
-# regression back to lead-by-index would break the test score visibly.
+# Split by patient, not by beat, so the model can't just memorise one person's
+# heartbeat. Assigned the rare classes first: LBBB is in only 4 patients
+# (109/111/207/214), so test LBBB rests on 214 alone. RBBB has 6, AFIB 7.
+# 114 is in test because it's the odd record with MLII in channel 1.
 TEST_RECORDS = ['114', '119', '202', '214', '221', '231', '232', '233', '234']
 
 # Checkpoint selection only. Never seen by the optimiser.
@@ -111,18 +100,16 @@ TRAIN_RECORDS = [r for r in USABLE_RECORDS
 # --------------------------------------------------------------------------
 # GUI demo clips
 # --------------------------------------------------------------------------
-# Nothing in these lists may come from TRAIN_RECORDS. step1b_check_split.py
-# enforces that and fails the build otherwise. Demoing a record the model was
-# fitted on would make the whole thing meaningless.
+# Test-fold records only. step1b_check_split.py fails the build if a training
+# record ends up in here.
 DEMO_ONLY_TEST_RECORDS = True
 
 DEMO_HEALTHY = [
     # record, fold, note
     ('234', 'test', '2689 normal vs 3 ectopic - essentially clean'),
     ('114', 'test', '97.7% normal; also the MLII-in-channel-1 record'),
-    # Val records are never trained on, but they did pick the checkpoint, so
-    # they are left out to keep every demo waveform completely unseen. Re-add
-    # them (and set DEMO_ONLY_TEST_RECORDS = False) for more variety:
+    # Val records picked the checkpoint, so they're left out. Re-add with
+    # DEMO_ONLY_TEST_RECORDS = False if you want more variety:
     #   ('205', 'val', '97.3% normal, faster sinus rhythm'),
 ]
 DEMO_HEALTHY_RECORD = DEMO_HEALTHY[0][0]
@@ -131,10 +118,8 @@ DEMO_ARRHYTHMIA = [
     # record, headline class, fold, note
     ('214', 'LBBB', 'test', '1992 LBBB + 255 PVC'),
     ('231', 'RBBB', 'test', '1242 RBBB, sustained throughout'),
-    # 232 dropped from the demo list: most of its beats are atrial ('A'/'a'),
-    # a class we don't have, so the dashboard just labels them as whichever of
-    # the five they resemble. Still in TEST_RECORDS, so it still counts in the
-    # reported metrics.
+    # 232 dropped from the demo list - mostly atrial beats ('A'/'a'), which we
+    # don't model. Still in TEST_RECORDS, so it counts in the metrics.
     ('119', 'PVC',  'test', '442 PVC in bigeminy - clean, regular pattern'),
     ('233', 'PVC',  'test', '826 PVC, 28% burden - the hard case'),
     ('221', 'AFIB', 'test', '2346 AFib beats, sustained'),
@@ -148,20 +133,17 @@ DEMO_ARRHYTHMIA = [
 DEMO_ARRHYTHMIA_RECORDS = {cls: rec for rec, cls, fold, _ in DEMO_ARRHYTHMIA
                            if fold == 'test'}
 
-# Seconds fed through the analyser before the display starts, so a replay is
-# already past the rhythm-feature warmup when the user sees it. Live capture
-# can't do this, so there the warmup is shown as a countdown instead.
+# Fed through the analyser before the display starts so a replay skips the
+# warmup. Live capture can't do that, it shows a countdown instead.
 DEMO_PRIME_S = 20.0
 
 # --------------------------------------------------------------------------
 # Numeric (rhythm) features
 # --------------------------------------------------------------------------
-# All causal: current and previous beats only, never a future one, so the same
-# code runs live on the UNO Q off a 10-entry ring buffer.
-#
-# First three are this beat's timing (what a PVC disturbs), the rest describe
-# irregularity over the last 10 beats (what AFib is). Per-beat features alone
-# gave AFIB F1 0.46, since an AFib beat in isolation looks normal.
+# Causal only - this beat and earlier ones, never a future one, so the same
+# code runs live off a 10-entry ring buffer. First three are this beat's
+# timing (PVC), the rest are irregularity over 10 beats (AFib). Without the
+# window features AFIB F1 was 0.46.
 FEATURE_NAMES = [
     "rr_prev",         # this RR interval, seconds
     "rr_delta",        # change from the previous RR interval
@@ -190,9 +172,8 @@ WEIGHT_DECAY = 1e-4
 LABEL_SMOOTHING = 0.05
 AUGMENT = True                # see BeatDataset in step2_train.py
 
-# Class-weight exponent for the loss. Dropped from 1.0 (full inverse frequency)
-# to 0.5, because at 1.0 the model fired AFIB at 2000+ normal beats to buy
-# recall and wrecked NOR precision.
+# Dropped from 1.0 to 0.5. At 1.0 the model called AFIB on 2000+ normal beats
+# chasing recall and wrecked NOR precision.
 CLASS_WEIGHT_POWER = 0.5
 
 # Weight-EMA decay. About 4 epochs of averaging at 243 steps/epoch.
@@ -201,11 +182,10 @@ EMA_DECAY = 0.999
 # --------------------------------------------------------------------------
 # Episode detection (GUI highlighting + Excel logging)
 # --------------------------------------------------------------------------
-# Consecutive beats of one class needed before it counts as a finding.
-# Per-class on purpose: a PVC is a single ectopic beat, so requiring three
-# meant never reporting one (record 119's 17 PVCs vanished from the list).
-# Sustained rhythms are the other way round, one stray LBBB call inside normal
-# sinus is just a misclassification.
+# Consecutive beats needed before it counts as a finding. Per-class, because a
+# PVC is a single beat - requiring 3 lost all 17 of record 119's PVCs. A lone
+# LBBB call inside normal sinus is usually just a misclassification, so the
+# sustained rhythms need 3.
 MIN_EPISODE_BEATS = {
     "PVC": 1,
     "LBBB": 3,
@@ -217,16 +197,12 @@ DEFAULT_MIN_EPISODE_BEATS = 3
 # Beats below this are greyed in the GUI and marked low confidence in the log.
 LOW_CONFIDENCE = 0.50
 
-# Minimum mean confidence before an episode is logged. Measured on the
-# validation patients, never on test, and per-class because the model is
-# badly calibrated in class-specific ways:
-#   PVC   gating helps: precision 0.272 -> 0.594 at 0.50, recall still 0.834
-#   LBBB  gating destroys it: recall 0.675 -> 0.025, most correct calls are
-#         below 0.45
-#   AFIB  gating runs backwards: precision 0.564 -> 0.409 as the threshold
-#         rises, since the most confident AFIB calls come from extreme RR
-#         irregularity, which is what a PVC-heavy record looks like
-#   RBBB  already 0.996 precision ungated, a gate only costs recall
+# Minimum mean confidence before an episode is logged. Per-class, measured on
+# the validation patients:
+#   PVC   helps: precision 0.272 -> 0.594 at 0.50
+#   LBBB  gating kills it: recall 0.675 -> 0.025
+#   AFIB  goes backwards: precision 0.564 -> 0.409 as the gate rises
+#   RBBB  already 0.996 precision, gating only costs recall
 MIN_EPISODE_CONFIDENCE = {
     "PVC": 0.50,
     "LBBB": 0.0,
@@ -234,28 +210,18 @@ MIN_EPISODE_CONFIDENCE = {
     "AFIB": 0.0,
 }
 
-# One stricter gate for every class when the input is a live sensor. The map
-# above was measured on MIT-BIH, where mean confidence is 0.71; on live BioAmp
-# input it's about 0.40 against a 0.20 chance level, because real electrode
-# noise makes beat morphology ~2.5x more variable (std 0.28 vs 0.11). Ungated,
-# a healthy resting subject produced 5 false AFIB/PVC episodes.
-#
-# Measured on a 23.6s BioAmp capture vs record 119 (24 real PVC episodes):
-#   gate 0.00 -> 5 false live episodes, 24/24 PVC kept
-#   gate 0.55 -> 0 false live episodes, 24/24 PVC kept
-#   gate 0.65 -> 0 false live episodes, 23/24 PVC kept
-# So 0.55. This doesn't make the model better on noisy input, it just makes it
-# decline to guess.
+# Stricter gate for live sensor input. The map above came from MIT-BIH, where
+# mean confidence is 0.71; on live BioAmp it's around 0.40 against a 0.20
+# chance level, and ungated a healthy subject threw 5 false AFIB/PVC episodes.
+# Tested on a 23.6s capture: 0.55 dropped those to 0 and still kept all 24
+# real PVCs from record 119. 0.65 started losing real ones.
 LIVE_MIN_EPISODE_CONFIDENCE = 0.55
 
-# Cap on episode length. Without it a patient who is in RBBB or AFib for the
-# whole recording produces one episode that never ends, so it never gets
-# finalised, logged or shaded.
+# Cap on episode length. Without it a patient in AFib for the whole recording
+# gives one episode that never ends, so it never gets logged.
 MAX_EPISODE_S = 30.0
 
-# Same thing for the on-device demo replay, but shorter. At 30s a 90s replay of
-# a sustained rhythm gives about three rows, the first only after 30s of
-# watching, which reads as "RBBB isn't logging". 10s gives ~9 rows and the
-# first within ten seconds. Display granularity only, it doesn't change which
-# beats are detected.
+# Shorter for the on-device demo. At 30s a 90s replay only gives ~3 rows and
+# the first takes 30s to appear, which looks like nothing is logging. Display
+# granularity only, doesn't change what gets detected.
 DEMO_MAX_EPISODE_S = 10.0

@@ -1,16 +1,13 @@
 """
-Export every approved demo record to applab/data/ so the on-device dashboard
-can replay any of them from a dropdown, with no MIT-BIH library or raw
-database on the board.
+Export the demo records to applab/data/ so the board can replay them from a
+dropdown without needing wfdb or the raw MIT-BIH database on it.
 
-Every record here is test fold only. This script just reads the vetted lists in
-config.DEMO_HEALTHY / DEMO_ARRHYTHMIA; the DEMO_ONLY_TEST_RECORDS guard in
-step1b_check_split.py is what actually enforces the rule.
+Test fold only. Reads the lists in config.DEMO_HEALTHY / DEMO_ARRHYTHMIA;
+step1b_check_split.py is what enforces that.
 
     python scripts/export_demo_records.py
 
-Writes one CSV per record plus demo_records.json (the manifest the dashboard
-reads to build its dropdown).
+Writes one CSV per record plus demo_records.json for the dropdown.
 """
 from __future__ import annotations
 
@@ -32,22 +29,14 @@ OUT = ROOT / "applab" / "data"
 SECONDS = 90
 EXPORT_FS = 250          # what the CSVs are stored at; see SELFTEST_SAMPLE_RATE
 
-# Where to start the 90 s excerpt, for records whose condition isn't there at
-# the beginning. Read off each record's own rhythm annotations rather than
-# guessed. Anything not listed here starts at 0.
+# Start offset for records whose condition isn't present at the beginning.
+# Anything not listed starts at 0.
 #
-#   202  the first 1142 s are annotated "(N", so exporting from 0 gives a demo
-#        labelled AFIB with no AFib in it. Of its three AFib runs, the start
-#        point matters a lot for PVC confusion:
-#            start 1180  101/180 AFib correct,  61 called PVC
-#            start 1260  100/142 AFib correct,  25 called PVC
-#            start 1380  125/139 AFib correct,   1 called PVC
-#            start 1620  119/133 AFib correct,   1 called PVC
-#        1180 is the onset of the first run, where RR irregularity is still
-#        settling and the model reads the transitional short-long pattern as
-#        ectopy. That's a real weakness, not a replay artefact, it reproduces
-#        at 360 Hz too. 1380 is a settled stretch and is what we export.
-#   221  annotated "(AFIB" from 0.1 s, so the default start is fine.
+#   202  first 1142s is annotated "(N", so exporting from 0 gives an AFIB demo
+#        with no AFib in it. Tried its three AFib runs - 1180 gets 101/180 with
+#        61 called PVC, 1380 gets 125/139 with only 1. 1180 is the onset where
+#        RR is still settling and the model reads it as ectopy. Export 1380.
+#   221  "(AFIB" from 0.1s, default start is fine.
 START_AT = {
     "202": 1380,
 }

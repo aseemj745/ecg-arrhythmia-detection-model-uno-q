@@ -1,25 +1,22 @@
 """
 ECG Arrhythmia Classifier - App Lab entry point for the Arduino UNO Q.
 
-Runs the INT8 ONNX model on the QRB2210 Linux side and serves a dashboard so
-the results can be watched from a browser while the work happens on the board.
-
-Two modes:
+Runs the INT8 ONNX model on the QRB2210 Linux side and serves a dashboard you
+can open in a browser while the board does the work.
 
     python3 python/main.py --mode selftest   # no hardware needed, run this first
     python3 python/main.py                   # live, and the default
 
-selftest replays a bundled 90 s recording of MIT-BIH record 119, a patient the
-model never trained on. No sensor, no electrodes. It checks the model runs
-correctly on ARM, separately from any wiring question.
+selftest replays a bundled 90s clip of MIT-BIH record 119, which the model
+never trained on. Checks the model runs on ARM without involving any wiring.
 
-live reads samples the MCU pushes over the App Lab Bridge. The Bridge is push,
-not pull, so the callback just drops each batch into a queue and returns;
-read_bridge_batch() drains it and hands run_loop() the same shape of data
-selftest does, so run_loop doesn't know which mode it is in.
+live reads what the MCU pushes over the Bridge. The Bridge is push, not pull,
+so the callback just queues each batch and returns. read_bridge_batch() drains
+the queue, so run_loop() gets the same shape either way and doesn't need to
+know which mode it's in.
 
-Default is live rather than selftest because App Lab's Start button can't pass
-arguments to the container, so whatever the default is is what a demo runs.
+Default is live because App Lab's Start button can't pass arguments, so
+whatever the default is is what a demo actually runs.
 """
 from __future__ import annotations
 
@@ -49,18 +46,16 @@ from ecg.pipeline import (ECGAnalyzer, StreamAnalyzer,             # noqa: E402
 MODEL = APP_ROOT / "models" / "model_int8.onnx"
 SAMPLE = APP_ROOT / "data" / "sample_ecg_250hz.csv"
 
-# Must match FS_HZ in sketch/sketch.ino. Was 250 here, which was wrong: timing
-# a real capture from its own timestamps gave 124.96 Hz. Getting this wrong
-# doesn't crash anything, it just scales every heart rate, so change it here if
-# you change the sketch.
+# Must match FS_HZ in sketch/sketch.ino. Was 250, which was wrong - timing a
+# real capture gave 124.96 Hz. A wrong value doesn't crash, it just scales
+# every heart rate, so update this if you change the sketch.
 MCU_SAMPLE_RATE = 125
 
-# The bundled selftest capture really is 250 Hz, which is its own rate and has
-# nothing to do with the MCU. Kept separate now that the two differ.
+# The bundled selftest clip is genuinely 250 Hz. Separate constant since the
+# two rates differ.
 SELFTEST_SAMPLE_RATE = 250
 
-# What the MCU sends per Bridge.notify(), 200 ms of ECG at 125 Hz. Nothing
-# below depends on it, but it's what "one push" means when reading the logs.
+# Samples per Bridge.notify(), so 200 ms at 125 Hz. Only useful for reading logs.
 MCU_BATCH_SIZE = 25
 
 DASHBOARD_PORT = 8080
@@ -72,28 +67,23 @@ DASHBOARD_WINDOW_S = 8.0     # seconds of waveform shown on the page
 # --------------------------------------------------------------------------
 _bridge_queue: "queue.Queue" = queue.Queue()
 
-# Set while a demo replay is running. Declared up here because _on_ecg_batch
-# reads it and needs to know to stand aside.
+# Set while a demo replay is running. Up here because _on_ecg_batch reads it.
 _demo_stop: "threading.Event | None" = None
 
-# Which source owns the analysis stream: "idle", "live" or "demo". Exactly one
-# at a time, which is what keeps the two signal sources out of each other's
-# buffer. Starts idle because the sketch pushes from the moment the app boots,
-# so starting in "live" meant a session was always already running before
-# anyone had chosen anything.
+# Who owns the analysis stream: "idle", "live" or "demo". One at a time, which
+# keeps the two sources out of each other's buffer. Starts idle because the
+# sketch pushes as soon as the app boots, so defaulting to "live" meant a
+# session was always running before anyone picked anything.
 _run_mode = "idle"
 
 
 # Motion state, pushed by the sketch as Bridge.notify("motion_state", 0/1).
-# The MCU makes the decision and stops sending ECG while there's movement, so
-# by the time anything gets here the bad samples are already gone. This side
-# only reports what the MCU did.
+# The MCU decides and stops sending ECG while moving, so the bad samples never
+# get here. This side just reports what it did.
 #
-# We don't reset StreamAnalyzer when motion ends. Tested on record 234 with
-# five pauses of 1.5-4s: all 106 beats still came back NOR and nothing was
-# reported even with the gate off, since RR_CLIP drops the odd interval and the
-# 10-beat window absorbs the rest. Resetting would cost ~10s of warmup
-# blindness after every movement for nothing.
+# No StreamAnalyzer reset when motion ends - RR_CLIP drops the odd interval
+# and the 10-beat window absorbs the rest. Resetting would cost ~10s of warmup
+# after every movement for nothing.
 MIN_MOTION_LOG_S = 0.30    # pauses shorter than this aren't logged
 
 _motion_active = False
@@ -239,15 +229,12 @@ def read_bridge_batch():
 # --------------------------------------------------------------------------
 # Demo replay - show it working with no hardware attached
 # --------------------------------------------------------------------------
-# Feeds a bundled MIT-BIH capture into the same queue a real Bridge push lands
-# in, so run_loop can't tell the difference. Useful because apps_start always
-# launches live mode, and with no sketch flashed the dashboard has nothing to
-# show but "waiting for the MCU sketch...".
+# Feeds a bundled MIT-BIH clip into the same queue a real Bridge push lands in,
+# so run_loop can't tell the difference. Needed because Start always launches
+# live mode, and with no sketch flashed there's nothing to show.
 #
-# Records come from data/demo_records.json, written by
-# scripts/export_demo_records.py. All of them are test fold, which is what
-# makes a correct detection here mean anything; step1b_check_split.py enforces
-# that rule.
+# Records come from data/demo_records.json (written by
+# scripts/export_demo_records.py) and are all test fold.
 
 
 def load_demo_records():
@@ -278,11 +265,9 @@ def _demo_meta(record_id):
 
 
 def _demo_replay_worker(stop_event, meta):
-    # The stream this feeds is created with fs=MCU_SAMPLE_RATE, but the bundled
-    # captures are stored at 250 Hz, so resample here. Otherwise the demo plays
-    # at the wrong speed and 250 Hz beats go through a filter tuned for 125.
-    # resample_poly and not data[::2]: plain slicing aliases QRS energy down
-    # into the band the model reads.
+    # Stream runs at MCU_SAMPLE_RATE but the clips are stored at 250 Hz, so
+    # resample. resample_poly rather than data[::2] - plain slicing aliases QRS
+    # energy down into the band the model reads.
     src_fs = int(meta.get("fs", SELFTEST_SAMPLE_RATE))
     data = np.loadtxt(APP_ROOT / "data" / meta["file"], delimiter=",",
                       dtype=np.float64)
@@ -438,13 +423,12 @@ class DashboardState:
         self.episodes = collections.deque(maxlen=100)
         # Shown while nothing has been classified yet. Not an error state.
         self.warmup_note = ""
-        # Confidence an episode needs before it's reported, sent to the browser
-        # so the waveform labels exactly the beats the table will show. Has to
-        # be the whole per-class map: sending a single number meant the page
-        # faded beats as "not reported" that the table then reported.
+        # Sent to the browser so the waveform labels the same beats the table
+        # shows. Needs the whole per-class map - a single number made the page
+        # fade beats as "not reported" that the table then reported.
         self.gates = {c: 0.0 for c in C.CLASSES}
-        # Which demo record is playing, so the dropdown shows the right
-        # selection after a reconnect or in a second browser tab.
+        # So the dropdown shows the right record after a reconnect or in a
+        # second tab.
         self.demo_record = DEFAULT_DEMO_RECORD
 
     def clear_history(self):
@@ -471,15 +455,10 @@ class DashboardState:
             })
 
     def snapshot(self, stream):
-        """
-        Build the dict for /state.json. The sample buffer is read off `stream`
-        rather than copied into DashboardState, since StreamAnalyzer already is
-        the rolling buffer.
-
-        Reading stream.buf from another thread is safe without a lock, because
-        push() replaces the attribute with a new array instead of mutating it,
-        so we always see it whole.
-        """
+        """Build the dict for /state.json. Reads the sample buffer off `stream`
+        instead of copying it, since StreamAnalyzer already is the rolling
+        buffer. No lock needed: push() swaps in a new array rather than
+        mutating, so we always see a whole one."""
         buf = stream.buf
         fs = stream.fs
         n_show = int(DASHBOARD_WINDOW_S * fs)
@@ -554,10 +533,9 @@ def run_loop(read, stream, writer, fs, stop_event=None, dashboard=None,
     generation = _stream_generation
 
     while stop_event is None or not stop_event.is_set():
-        # A demo start/stop invalidates everything so far. The caller clears
-        # StreamAnalyzer and DashboardState, these locals are ours. Without
-        # this the sample counter snapped back to its pre-reset value and beats
-        # from two sources got grouped into one episode.
+        # A demo start/stop invalidates everything so far. Caller clears the
+        # stream and dashboard, these locals are ours. Without it the sample
+        # count snapped back and beats from two sources landed in one episode.
         if _stream_generation != generation:
             generation = _stream_generation
             beats, reported = [], set()
@@ -570,10 +548,9 @@ def run_loop(read, stream, writer, fs, stop_event=None, dashboard=None,
             time.sleep(0.005)
             continue
 
-        # Demo replay feeds the same queue as a real push, so this loop can't
-        # otherwise tell the two apart. Decide once here, before grouping:
-        # which gate applies (the live gate would suppress real LBBB and AFIB
-        # findings on database signal), and how the row gets tagged in the CSV.
+        # Demo feeds the same queue as a real push, so decide once here which
+        # gate applies (the live gate would suppress real LBBB/AFIB on database
+        # signal) and how the CSV row gets tagged.
         demo_active = _demo_active()
         demo_record_id = (dashboard.demo_record
                           if demo_active and dashboard is not None else "")
@@ -593,16 +570,14 @@ def run_loop(read, stream, writer, fs, stop_event=None, dashboard=None,
         compute_s += time.perf_counter() - _t
 
         if dashboard is not None:
-            # The "waiting for the MCU sketch..." placeholder is set once
-            # before the loop and never touched again, so without this it stays
-            # stuck on "waiting" even once batches are flowing.
+            # The placeholder is set once before the loop, so without this it
+            # stays on "waiting" even after batches start arriving.
             if (_run_mode == "live"
                     and dashboard.status == "waiting for the MCU sketch..."):
                 dashboard.status = "LIVE - receiving ECG data"
-            # analyse() returns nothing until 12 R-peaks are in the buffer,
-            # because the RR branch has no history yet. So the first ~10s draws
-            # a waveform with no markers, which looks like the model ignoring
-            # obvious beats. Say so instead.
+            # Nothing comes back until 12 R-peaks are buffered, so the first
+            # ~10s is a waveform with no markers. Looks like the model is
+            # ignoring obvious beats, so say what's happening instead.
             if not stream.emitted:
                 dashboard.warmup_note = (
                     f"warming up - the model needs {C.RR_LOCAL_WINDOW + 2} "

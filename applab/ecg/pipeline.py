@@ -190,21 +190,17 @@ class StreamAnalyzer:
 
         beats, _ = self.analyzer.analyse(self.buf, self.fs)
 
-        # analyse() resamples to 360 Hz internally, so its b.sample values
-        # index the resampled buffer while self.buf and self.offset are in
-        # input samples. Mixing the two gave negative durations and impossible
-        # heart rates on any input that wasn't already 360 Hz, i.e. every real
-        # BioAmp stream. Convert before combining.
+        # analyse() resamples to 360 Hz, so b.sample indexes the resampled
+        # buffer while self.buf and self.offset are in input samples. Mixing
+        # them gave negative durations on anything not already 360 Hz.
         to_input = self.fs / C.FS
         n_model = len(self.buf) / to_input
         edge_model = n_model - C.AFTER      # incomplete windows live past here
 
-        # Dedup on exact index isn't enough. Each analysis sees a different
-        # slice, so the adaptive threshold can place the same beat a sample or
-        # two from where it put it last time, and the shifted copy gets emitted
-        # again out of order. That's what produced episodes whose end came
-        # before their start. Gate on the refractory period instead: two beats
-        # can't be 200 ms apart, so anything closer is the same beat.
+        # Dedup on exact index isn't enough - each pass sees a different slice,
+        # so the adaptive threshold can shift a beat by a sample or two and the
+        # copy gets emitted again. Gate on the refractory period instead: two
+        # real beats can't be 200 ms apart.
         min_gap = int(0.20 * self.fs)
         new = []
         for b in sorted(beats, key=lambda x: x.sample):

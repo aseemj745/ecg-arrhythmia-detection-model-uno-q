@@ -84,10 +84,10 @@ macro F1 **0.757**, accuracy 0.769, 67,909 parameters, 91 KB INT8.
 
 <img src="docs/images/confusion_matrix_int8.png" alt="INT8 confusion matrix on the 9 held-out test patients" width="420"> <img src="docs/images/training_curves.png" alt="Training curves" width="420">
 
-Treated as a screening question instead (abnormal vs normal, which is what the
-GUI highlights) it gives sensitivity 0.939 and specificity 0.760, so balanced
-accuracy 0.850. That is an easier task than the 5-way one, so it is listed
-next to those numbers rather than in place of them.
+As a screening question instead (abnormal vs normal, which is what the GUI
+highlights) it gives sensitivity 0.939 and specificity 0.760, so balanced
+accuracy 0.850. That is an easier task than the 5-way one, so it sits next to
+those numbers, not in place of them.
 
 ### Ablation: are the RR features worth having?
 
@@ -140,7 +140,7 @@ dropdown is marked `(test)` or `(val)` so a viewer can see how unseen it is.
 
 ## Limitations
 
-Listing these because they change how the numbers should be read.
+These affect how the numbers above should be read.
 
 - **LBBB rests on one test patient.** There are only 4 LBBB patients in all of
   MIT-BIH (109, 111, 207, 214), so one of them had to be the test patient. The
@@ -153,8 +153,8 @@ Listing these because they change how the numbers should be read.
   burden) and from LBBB beats in 214 being called PVC. Both are wide-QRS
   classes and telling them apart is where this model is weakest.
 - **AFIB vs NOR is the other main confusion.** AFib beats really do look
-  normal, only the rhythm gives them away, so this class depends more than any
-  other on the RR window features being right.
+  normal on their own, only the rhythm gives them away, so this class leans
+  hardest on the RR features being right.
 - **No VF/VT detection.** Out of scope. It needs a window-based detector rather
   than beat segmentation, because VF has no organised QRS to segment in the
   first place.
@@ -179,8 +179,8 @@ Listing these because they change how the numbers should be read.
 
 Left is the average beat shape the model was trained on (MIT-BIH record 100).
 Right is the average beat from a real BioAmp capture, aligned the same way.
-Same QRS timing and roughly the same T-wave shape, which is what "the signal
-path produces a real ECG" looks like when you check it rather than assume it.
+Same QRS timing and roughly the same T-wave shape, so the sensor really is
+producing an ECG the model can read.
 
 ---
 
@@ -203,7 +203,7 @@ python step3_export_onnx.py
 python step4_evaluate.py
 ```
 
-Every stage writes its output to disk, nothing is held only in memory.
+Every stage writes its output to disk.
 
 ### Library
 
@@ -228,9 +228,9 @@ monitor needs to respond within a beat or two.
 **Lead MLII, picked by name.** The BioAmp EXG Pill gives a limb-lead-like
 signal, so training on a V1 chest lead would score better in testing but not
 match the sensor we deploy with. The channel comes from `sig_name`, never from
-an index. Record 114 has its MLII in channel 1, and it sits in the test set on
-purpose, so if lead selection ever went back to using an index the test score
-would break visibly instead of drifting.
+an index. Record 114 has its MLII in channel 1 and sits in the test set on
+purpose, so going back to index-based selection would break the test score
+instead of quietly degrading it.
 
 **Polarity normalisation.** Each beat is flipped so the dominant QRS deflection
 points up. MIT-BIH has the same condition recorded in both polarities (LBBB in
@@ -260,13 +260,12 @@ of record 233's normal beats were being called AFib.
 AFib beats can look completely normal on their own, it is the RR timing that
 gives it away. On the left, RR interval beat to beat, regular vs jagged. On the
 right, the same thing as a Poincare plot, a tight cluster vs a wide smear. This
-is why the model needs the RR branch and not just the waveform CNN, and the
-ablation table above is the same point in numbers.
+is why the model needs the RR branch and not only the waveform CNN. The
+ablation table above shows the same thing in numbers.
 
-**No LSTM, at least for now.** There is not much long-range temporal structure
-in a single segmented beat for a recurrent layer to use, and recurrence
-parallelises badly on a Cortex-A53. See the roadmap for when this is worth
-revisiting.
+**No LSTM, at least for now.** There isn't much long-range structure in a
+single beat for a recurrent layer to use, and recurrence parallelises badly on
+a Cortex-A53. See the roadmap for when this is worth revisiting.
 
 **Weight EMA for picking the checkpoint.** Held-out macro F1 swung between 0.47
 and 0.73 between adjacent epochs. With only 5 validation patients the selection
@@ -287,8 +286,7 @@ no MLII channel at all, so they would have been dropped anyway.
 
 ## Roadmap: towards a standalone home monitor
 
-Everything above is what has been built. The items below are planned next
-steps, listed so the direction is clear.
+Everything above is built. Below is what comes next.
 
 - **On-device display.** A small TFT or OLED wired to the board showing the
   live waveform and the detected class, so no browser, phone or network is
