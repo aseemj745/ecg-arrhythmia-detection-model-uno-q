@@ -149,8 +149,7 @@ These are stated because they affect how the numbers should be read.
 - **No claim of live arrhythmia detection from a person.** The demo runs a
   live *normal* signal from a volunteer and separately replays held-out
   MIT-BIH arrhythmia records. The GUI labels which is which.
-- **On-device sample rate now matches the real sensor sketch (fixed
-  2026-08-20).** `MCU_SAMPLE_RATE` in `applab/python/main.py` was 250 Hz,
+- **On-device sample rate now matches the real sensor sketch** `MCU_SAMPLE_RATE` in `applab/python/main.py` was 250 Hz,
   which was true for two of the reference sketches used during development
   but not the one actually in use. A real BioAmp EXG Pill capture's own
   timestamps measured 124.96 Hz empirically, matching the sketch's `FS_HZ`
