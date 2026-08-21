@@ -1,8 +1,10 @@
 # ECG Arrhythmia Detection — MIT-BIH → ONNX INT8 → Arduino UNO Q
 
-Per-beat 5-class arrhythmia classification (NOR / LBBB / RBBB / PVC / AFIB)
-from a single MLII-equivalent lead, trained on MIT-BIH and exported to a
-91 KB INT8 ONNX model for the QRB2210 Linux side of an Arduino UNO Q.
+An ultra-low-compute per-beat 5-class arrhythmia classifier (NOR / LBBB /
+RBBB / PVC / AFIB) from a single MLII-equivalent lead, trained on MIT-BIH
+and exported to a 91 KB, 67,909-parameter INT8 ONNX model — small and cheap
+enough to run in real time on the Arduino UNO Q's Cortex-A53. The goal is a
+home ECG monitor built around hardware this small, not a cloud service.
 
 ---
 
@@ -207,9 +209,9 @@ Every stage writes to disk. Nothing exists only in RAM.
 ## Key design decisions
 
 **Per-beat, not per-recording.** R-peak-centred windows, one label per beat,
-0.30 s before to 0.50 s after at 360 Hz = 288 samples. Chosen over the
-whole-recording approach of the reference paper because the product has to
-respond within a beat or two, not after 60 seconds.
+0.30 s before to 0.50 s after at 360 Hz = 288 samples. Chosen over a
+whole-recording approach because the product has to respond within a beat
+or two, not after 60 seconds.
 
 **Lead MLII, selected by name.** The BioAmp EXG Pill produces a limb-lead-like
 signal, so training on a V1 chest lead would score better in testing and
@@ -250,9 +252,9 @@ Right: same idea as a Poincare plot, a tight cluster vs a wide smear. This
 is the entire reason the model needs the RR-feature branch, not just the
 waveform CNN — see the ablation numbers above.*
 
-**No LSTM.** On a single segmented beat there is minimal long-range temporal
-structure to exploit, and recurrence parallelises badly on a Cortex-A53. The
-reference paper's own ablation showed diminishing returns from its BiLSTM.
+**No LSTM (for now — see Roadmap below).** On a single segmented beat there
+is minimal long-range temporal structure to exploit, and recurrence
+parallelises badly on a Cortex-A53.
 
 **Weight EMA for checkpoint selection.** Held-out macro F1 swung between 0.47
 and 0.73 between adjacent epochs — with only 5 validation patients the
@@ -270,13 +272,30 @@ MLII channel at all, so they would have been excluded regardless.
 
 ---
 
-## Prior art
+## Roadmap — towards a standalone home ECG monitor
 
-"Tiny Arrhythmia Classification" — arxiv.org/html/2511.08650 — cited as
-architectural inspiration only; no code copied (their repo has no licence).
-Their setup differs on nearly every axis (whole-60 s windows, 9 CPSC classes,
-250 Hz, CNN+attention+BiLSTM at 0.945M params, benchmarked on a Pi 4/4GB), so
-their numbers are **not** comparable to these and are not presented as such.
+Everything above is the competition submission. These are the planned next
+steps beyond it — not built yet, listed here so the direction is clear.
+
+- **On-device display.** A small TFT or OLED screen wired directly to the
+  board, showing the live waveform and detected class right on the
+  hardware — no browser, no phone, no network needed to see a result.
+- **Fully offline operation.** No internet connectivity needed at any
+  point. The current App Lab dashboard is a development/demo convenience,
+  not the end state — the goal is a device that works standalone.
+- **CPSC2018 dataset supplementation.** Already flagged above as the real
+  fix for LBBB's single-patient limitation (see Honest limitations) — this
+  is the next real accuracy lever, not just an idea.
+- **More electrodes, closer to 12-lead.** The current model uses a single
+  MLII-equivalent lead. Adding more BioAmp channels to approximate a
+  standard 12-lead placement would give both the model and a viewer a
+  fuller picture than one lead can provide.
+- **Revisit attention/BiLSTM, inside a hard budget.** This model
+  deliberately has no recurrence (see "No LSTM" above) because it wasn't
+  worth it at this scale. With more data (CPSC2018) and more leads, that
+  trade-off is worth re-testing — but only if total parameters stay under
+  0.5M, so it still fits comfortably on the same class of hardware. The
+  budget is the constraint here, not the ambition.
 
 ---
 
