@@ -3,18 +3,17 @@ ECG Arrhythmia Detection - demo GUI.
 
     python gui_app.py
 
-Two scrolling traces:
-  TOP     a healthy held-out MIT-BIH patient, as the reference of what
-          normal looks like coming through this exact pipeline
-  BOTTOM  the monitored channel - either another held-out MIT-BIH patient
-          with a known arrhythmia, or the live BioAmp sensor
+Two scrolling traces. The top one is a healthy held-out MIT-BIH patient, there
+as a reference for what normal looks like through this same pipeline. The
+bottom one is the monitored channel, either another held-out patient with a
+known arrhythmia or the live BioAmp sensor.
 
-Detected episodes on the BOTTOM trace are shaded on the plot and streamed to
-a background process (log_worker.py) that appends them to an Excel workbook.
+Episodes detected on the bottom trace get shaded on the plot and streamed to
+log_worker.py, which appends them to an Excel workbook in the background.
 
-Honesty rule, straight from the project brief: the banner always states
-whether the monitored trace is a recorded MIT-BIH patient or a live person,
-and arrhythmias are never presented as having come from a live volunteer.
+The banner always says whether the monitored trace is a recorded MIT-BIH
+patient or a live person. Arrhythmias are never shown as if they came from a
+live volunteer.
 """
 from __future__ import annotations
 
@@ -127,16 +126,10 @@ class Channel:
         if len(self.beats) > 400:
             self.beats = self.beats[-400:]
 
-        # Display and reporting are deliberately separate.
-        #
-        # DISPLAY takes every episode including the one still in progress, so
-        # the shading appears on screen the moment a run qualifies rather
-        # than after it ends.
-        #
-        # REPORTING waits until a run is finalised - a different label has
-        # arrived, or MAX_EPISODE_S has chunked it - so each Excel row has a
-        # settled duration and beat count, and a sustained arrhythmia still
-        # produces rows as it goes instead of one row that never arrives.
+        # Display and reporting are separate on purpose. Display takes every
+        # episode including the one in progress, so shading appears as soon as
+        # a run qualifies. Reporting waits until a run is finalised, so each
+        # Excel row has a settled duration and beat count.
         eps = group_episodes(self.beats)
         self.episodes = eps[-200:]
 

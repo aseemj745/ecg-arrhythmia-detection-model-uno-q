@@ -1,23 +1,21 @@
 """
 Headless arrhythmia monitor for the Arduino UNO Q (QRB2210 Linux side).
 
-This is the on-device counterpart of gui_app.py. No GUI, no matplotlib, no
-PyTorch, no wfdb - just numpy, scipy and onnxruntime reading the INT8 model.
+The on-device counterpart of gui_app.py. No GUI, no matplotlib, no PyTorch, no
+wfdb, just numpy, scipy and onnxruntime reading the INT8 model.
 
-    # from the STM32 bridge over serial (125 Hz - confirmed empirically from
-    # a real BioAmp EXG Pill capture's own timestamps, 2026-08-20)
+    # from the STM32 bridge over serial (the sketch samples at 125 Hz)
     python3 uno_q_monitor.py --serial /dev/ttyACM0 --fs 125
 
     # from a bridge script that prints samples to stdout
     python3 /app/python/adc_reader_uno_q_bridge.py | python3 uno_q_monitor.py --stdin --fs 125
 
-    # replay a captured CSV of the bundled MIT-BIH self-test data, which is
-    # genuinely resampled to 250 Hz (unrelated to the live rate above)
+    # replay the bundled MIT-BIH selftest capture, which is 250 Hz
     python3 uno_q_monitor.py --csv capture.csv --fs 250
 
-Every detected episode is appended to a CSV immediately (line-buffered, so a
-power cut costs at most the current line) and printed to stdout so it shows
-up in journalctl if you run this as a service.
+Episodes are appended to a CSV as they happen (line-buffered, so a power cut
+costs at most the current line) and printed to stdout, so they show up in
+journalctl if you run this as a service.
 """
 from __future__ import annotations
 

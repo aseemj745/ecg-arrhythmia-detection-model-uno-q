@@ -5,8 +5,8 @@ STEP 2 - Train the multi-input beat classifier.
     python step2_train.py --no-rr         # CNN-only ablation
     python step2_train.py --epochs 10     # quick smoke run
 
-Everything lands on disk as it goes: best checkpoint, last checkpoint,
-training history json and a loss/F1 curve. Nothing lives only in RAM.
+Everything is written to disk as it goes: best checkpoint, last checkpoint,
+training history json and a loss/F1 curve.
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class BeatDataset(Dataset):
 
       time shift  - the STM32 R-peak detector will not land on exactly the
                     same sample offset the MIT-BIH annotator chose
-      time warp   - the SAME condition is wider or narrower from patient to
+      time warp   - the same condition is wider or narrower from patient to
                     patient; with only 4 LBBB and 6 RBBB patients in the
                     whole database this is the augmentation that actually
                     buys held-out generalisation

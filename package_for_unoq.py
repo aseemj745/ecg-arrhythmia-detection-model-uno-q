@@ -3,10 +3,10 @@ Build the deployment bundle for the Arduino UNO Q.
 
     python package_for_unoq.py
 
-Writes artifacts/unoq_deploy.tar.gz containing ONLY what the board needs:
-the INT8 model, the ecg package, the headless monitor, and a requirements
-file. No PyTorch, no matplotlib, no wfdb, no dataset - about 100 KB total
-instead of the multi-gigabyte training environment.
+Writes artifacts/unoq_deploy.tar.gz with just what the board needs: the INT8
+model, the ecg package, the headless monitor and a requirements file. No
+PyTorch, no matplotlib, no wfdb, no dataset, so about 100 KB rather than the
+multi-gigabyte training environment.
 """
 from __future__ import annotations
 

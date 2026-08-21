@@ -6,10 +6,9 @@ Build the Arduino App Lab importable .zip.
 Produces artifacts/ecg_arrhythmia_unoq.zip, which App Lab's
 "Import an App -> Import from computer" accepts.
 
-IMPORTANT - the manifest is a best guess.
-App Lab 0.8.0's exact app.yaml schema has not been verified against this
-board, because apps live on the UNO Q itself and not on the PC. If the
-import is rejected, do NOT fight it: run
+The manifest is a best guess. App Lab 0.8.0's exact app.yaml schema hasn't
+been checked against this board, since apps live on the UNO Q itself and not
+on the PC. If the import gets rejected, don't fight it, run
     python package_applab.py --show-manifest-help
 and follow the instructions to dump the manifest of an existing working app
 (e.g. "ECG Monitor"), then paste it back so this file can be corrected.
@@ -29,13 +28,11 @@ ROOT = Path(__file__).resolve().parent
 APPDIR = ROOT / "applab"
 APP_NAME = "ecg_arrhythmia_unoq"
 
-# Fields (name/icon/description/version/bricks) and their layout confirmed
-# against real app.yaml files in arduino/app-bricks-examples (e.g.
-# system-resources-logger, 08-web-ui-basics/02-data-transmission) - not a
-# guess. `bricks: - arduino:web_ui` is what actually gets the dashboard's
-# port published from the container to the host; nothing else on this
-# platform does that (searched all 156 example app.yaml files for a real
-# `ports:` value - zero hits).
+# Field names and layout taken from real app.yaml files in
+# arduino/app-bricks-examples. `bricks: - arduino:web_ui` is what publishes the
+# dashboard's port from the container to the host; nothing else on this
+# platform does (searched all 156 example app.yaml files for a real `ports:`
+# value and got zero hits).
 MANIFEST = """\
 name: ECG Arrhythmia Classifier
 icon: "\U0001F493"
@@ -90,18 +87,11 @@ def main():
     shutil.copy2(ROOT / "artifacts" / "models" / "model_int8.onnx",
                  APPDIR / "models" / "model_int8.onnx")
     (APPDIR / "app.yaml").write_text(MANIFEST, encoding="utf-8")
-    # MUST be python/requirements.txt, not an app-root file - confirmed
-    # against arduino/app-bricks-examples (system-resources-logger,
-    # mascot-jump-game): the App Lab container auto-installs from this exact
-    # path on start, picked up by convention, no app.yaml reference needed.
-    # An app-root requirements.txt is silently ignored, which is the bug
-    # that made the container crash with ModuleNotFoundError: onnxruntime.
-    #
-    # Pinned to the EXACT versions verified on the desktop (numpy 2.5.1,
-    # scipy 1.18.0, onnxruntime 1.28.0 - see test.py's original output).
-    # This container is isolated per-app, unlike the shared host Python, so
-    # there is no apt-shadowing risk here (that only matters when installing
-    # directly on the board's own Python, outside this container).
+    # Has to be python/requirements.txt, not app-root. The container installs
+    # from this path by convention and ignores an app-root one, which is what
+    # made it crash with ModuleNotFoundError: onnxruntime. Pinned to the
+    # versions checked on the desktop; no apt-shadowing risk since the
+    # container is isolated per app.
     (APPDIR / "python" / "requirements.txt").write_text(
         "numpy==2.5.1\nscipy==1.18.0\nonnxruntime==1.28.0\n", encoding="utf-8")
 

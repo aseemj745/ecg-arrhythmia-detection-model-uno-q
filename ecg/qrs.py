@@ -1,15 +1,12 @@
 """
 Pan-Tompkins R-peak detection.
 
-Needed in two places:
-  * the GUI demo, so a MIT-BIH record can be played through the SAME path the
-    hardware uses instead of being handed its own answer key from the
-    annotation file
-  * live BioAmp input, where there are no annotations at all
+Needed in two places: the GUI demo, so a MIT-BIH record goes through the same
+path the hardware uses instead of being handed the answers from its annotation
+file, and live BioAmp input, where there are no annotations at all.
 
-On the finished product the STM32U585 does this job and the Linux side only
-receives R-peak positions. This implementation is the reference/fallback, and
-it is what makes the desktop demo an honest rehearsal of the device.
+On the finished product the STM32U585 does this and the Linux side only gets
+R-peak positions. This is the reference version and the fallback.
 """
 from __future__ import annotations
 
@@ -20,8 +17,8 @@ from . import config as C
 
 
 def _bandpass(sig, fs, lo=5.0, hi=15.0, order=2):
-    """5-15 Hz is where QRS energy concentrates; P and T waves and baseline
-    wander mostly fall outside it, which is the whole trick."""
+    """5-15 Hz is where QRS energy sits. P waves, T waves and baseline wander
+    mostly fall outside it, which is the whole trick."""
     nyq = 0.5 * fs
     hi = min(hi, nyq * 0.95)
     b, a = butter(order, [lo / nyq, hi / nyq], btype="band")
@@ -32,9 +29,9 @@ def detect_r_peaks(sig, fs=C.FS, refractory_ms=200, integ_ms=150):
     """
     Return R-peak sample indices.
 
-    Pipeline: bandpass -> derivative -> square -> moving-window integration
-    -> adaptive threshold with a refractory period. The refractory period is
-    what stops a tall T wave from being counted as a second beat.
+    bandpass -> derivative -> square -> moving-window integration -> adaptive
+    threshold with a refractory period. The refractory period is what stops a
+    tall T wave being counted as a second beat.
     """
     sig = np.asarray(sig, dtype=np.float64)
     if len(sig) < fs:
@@ -47,8 +44,8 @@ def detect_r_peaks(sig, fs=C.FS, refractory_ms=200, integ_ms=150):
     win = max(1, int(integ_ms * fs / 1000))
     integ = np.convolve(sq, np.ones(win) / win, mode="same")
 
-    # Adaptive threshold: track the running signal and noise levels the way
-    # Pan-Tompkins does, so the detector survives amplitude drift.
+    # Track running signal and noise levels the way Pan-Tompkins does, so the
+    # detector survives amplitude drift.
     thresh = 0.3 * np.mean(integ) + 0.2 * np.std(integ)
     refractory = int(refractory_ms * fs / 1000)
 
@@ -66,9 +63,9 @@ def detect_r_peaks(sig, fs=C.FS, refractory_ms=200, integ_ms=150):
     if not peaks:
         return np.array([], dtype=np.int64)
 
-    # The integrator delays and smears the peak; snap each detection onto the
-    # true extremum of the raw trace inside a +/-100 ms window, because the
-    # beat window we cut later must be centred on the actual R-peak.
+    # The integrator delays and smears the peak, so snap each detection onto
+    # the real extremum of the raw trace within +/-100 ms. The beat window we
+    # cut later has to be centred on the actual R-peak.
     snap = int(0.10 * fs)
     refined = []
     for p in peaks:

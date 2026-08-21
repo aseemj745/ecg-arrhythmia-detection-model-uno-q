@@ -1,9 +1,9 @@
 """
 Evaluation helpers.
 
-Overall accuracy is deliberately never reported on its own: with a ~10x
-class imbalance, a model that answered "NOR" to everything would score 65%
-and be completely useless. Everything here is per-class.
+Everything here is per-class. Overall accuracy is never reported on its own,
+because with a ~10x class imbalance a model that answered "NOR" to everything
+would score 65% and be useless.
 """
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ from . import config as C
 
 def report(y_true, y_pred):
     """Return a dict of per-class and aggregate metrics."""
+    # labels=range(N_CLASSES) so a class the model never predicts still shows
+    # up as a zero row instead of vanishing from the table.
     p, r, f1, sup = precision_recall_fscore_support(
         y_true, y_pred, labels=range(C.N_CLASSES), zero_division=0)
     cm = confusion_matrix(y_true, y_pred, labels=range(C.N_CLASSES))
@@ -60,6 +62,8 @@ def plot_confusion(rep, path, title):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    # Row-normalise, so the rare classes are readable next to NOR's 8,939
+    # beats. clip at 1 to avoid dividing by an empty row.
     cm = np.array(rep["confusion_matrix"], dtype=float)
     norm = cm / np.clip(cm.sum(axis=1, keepdims=True), 1, None)
 

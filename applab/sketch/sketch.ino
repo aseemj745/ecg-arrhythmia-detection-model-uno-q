@@ -1,55 +1,29 @@
 /*
- * ============================================================
- * ECG UNO Q - STM32 MCU SIDE
- * ============================================================
+ * ECG UNO Q - STM32 MCU side.
  *
- * PROVENANCE - copied VERBATIM from the teammate-built "ecg-monitor"
- * App Lab app, which was validated end-to-end on real hardware
- * (2026-08-20: clean PQRST morphology, HR ~90 bpm, plausible
- * PR/QRS/QT) before being brought in here. Deliberately NOT
- * modified: this is the proven acquisition path, and the Python
- * side was adapted to match it rather than the other way round.
+ * Started from a teammate's working "ecg-monitor" App Lab app, which had
+ * already been checked on real hardware (clean PQRST, HR around 90 bpm). The
+ * ECG acquisition path is theirs and is left alone, since it works and the
+ * Python side was adapted to match it. Only the motion thresholds and debounce
+ * counts below have been retuned.
  *
- * Without this sketch the app has no MCU side at all, so nothing
- * ever calls Bridge.notify("ecg_batch", ...) and the Linux-side
- * Bridge.provide("ecg_batch", ...) callback never fires - the
- * dashboard sits on "waiting for the MCU sketch... 0 samples"
- * forever. That was exactly the bug this file fixes.
+ * Wiring:
+ *   BioAmp EXG Pill -> A0
+ *   MPU6050         -> I2C (SDA/SCL)
  *
- * FS_HZ below (125) is the GROUND TRUTH for the sample rate.
- * Comments elsewhere in this file and in the original app's
- * description say 250 Hz - those are stale, do not trust them.
- * MCU_SAMPLE_RATE in python/main.py must always equal FS_HZ here.
+ * Sampling: ECG at 125 Hz, MPU6050 at 50 Hz.
+ * FS_HZ below is the real sample rate. Some comments further down in this file
+ * still say 250 Hz, they're stale. MCU_SAMPLE_RATE in python/main.py has to
+ * match FS_HZ here.
  *
- * BioAmp EXG Pill -> A0
- * MPU6050 (motion/displacement) -> I2C (SDA/SCL)
+ * Bridge: 25 ECG samples per notification, so 200 ms per push. "motion_state"
+ * is edge-triggered, one notification per state change, not per sample.
  *
- * Sampling:
- *   ECG:      125 Hz
- *   MPU6050:   50 Hz
+ * Motion gating: while the MPU6050 sees a big displacement we stop batching and
+ * sending ECG, since a moving electrode gives motion artifact rather than
+ * cardiac signal. It resumes on its own once things settle.
  *
- * Bridge:
- *   MCU -> Linux MPU
- *
- * Transfer:
- *   25 ECG samples per Bridge notification
- *   = 200 ms of ECG data
- *
- *   1 "motion_state" notification per motion state change
- *   (edge-triggered, not sent every sample)
- *
- * Motion gating:
- *   While the MPU6050 reports a big displacement (the patient/
- *   sensor moved suddenly), ECG samples stop being batched and
- *   sent -- a moving electrode produces motion artifact, not
- *   real cardiac signal, so we pause collection rather than
- *   stream garbage. Collection resumes automatically once the
- *   sensor is still again.
- *
- * Arduino_RouterBridge:
- *   0.4.3
- *
- * ============================================================
+ * Arduino_RouterBridge 0.4.3.
  */
 
 #include <Arduino_RouterBridge.h>
@@ -86,47 +60,23 @@ const uint8_t MPU6050_REG_ACCEL_XOUT_H = 0x3B;
 // LSB per g for the default +/-2g accelerometer range.
 const float ACCEL_LSB_PER_G = 16384.0f;
 
-// How far the measured acceleration magnitude may drift from the
-// slow-tracked "at rest" baseline (~1 g) before it counts as motion.
-//
-// TWO thresholds, not one - a Schmitt trigger. A single 0.35g cutoff had
-// two problems at once: it took a genuinely large displacement to trip at
-// all, and once tripped, settling back through that same 0.35g line
-// produced a burst of sub-0.2s on/off events (visible in detections.csv as
-// a dozen near-instant MOTION rows) because ordinary hand tremor while
-// coming to rest crosses one fixed line back and forth several times.
-//
-// The fix is the standard one for a noisy threshold: enter on a LOWER bar
-// (catches smaller movements, as asked) and require a LOWER bar still to
-// exit (so noise right at the enter line, which is the exact regime a
-// settling hand sits in, cannot re-trigger it). The gap between the two is
-// what kills the chatter; catching smaller movements is what lowering
-// MOTION_ENTER_THRESHOLD_G does. Retune both together if this still trips
-// too easily/rarely on your bench - MPU6050 resting noise on this board
-// was not characterised, so these are a starting point, not a measurement.
+// How far acceleration may drift from the slow-tracked "at rest" baseline
+// (~1 g) before it counts as motion. Two thresholds, i.e. a Schmitt trigger:
+// a single 0.35g cutoff needed a big movement to trip and then chattered on
+// the way back down, filling detections.csv with near-instant MOTION rows.
+// Retune both together if it trips too easily on your bench, resting noise on
+// this board was never characterised so these are a starting point.
 const float MOTION_ENTER_THRESHOLD_G = 0.12f;
 const float MOTION_EXIT_THRESHOLD_G  = 0.06f;
 
-// Consecutive over/under-threshold IMU samples required to flip state.
-//
-// ASYMMETRIC on purpose - fast attack, slow release. A symmetric 3-sample
-// debounce (60 ms each way) is what filled detections.csv with a wall of
-// 0.06-0.2 s MOTION rows: a single real movement is not one clean
-// excursion, it is a burst of them, and releasing after only 60 ms of calm
-// chops that burst into a dozen separate "pauses" with slivers of ECG
-// between them. None of those slivers is long enough to be worth
-// analysing, and the log becomes unreadable.
-//
-// Entering fast (40 ms) keeps the gate responsive, which is the whole
-// point of catching movement. Leaving slowly (500 ms of sustained calm)
-// merges the burst into ONE window that starts at the first twitch and
-// ends when the body has genuinely settled - which is what a reader
-// actually wants to see, and what the Motion log table is for.
+// Consecutive IMU samples needed to flip state. Asymmetric on purpose, fast
+// attack and slow release: a real movement is a burst of excursions, not one
+// clean one, so releasing after 60 ms of calm chopped it into a dozen separate
+// pauses. 500 ms merges the burst into one window.
 const int MOTION_ENTER_DEBOUNCE = 2;    // 40 ms at 50 Hz
 const int MOTION_EXIT_DEBOUNCE  = 25;   // 500 ms at 50 Hz
 
-// Sample the IMU at 50 Hz -- plenty to catch body movement while
-// staying light next to the 125 Hz ECG loop.
+// 50 Hz is plenty for body movement and stays light next to the 125 Hz ECG loop.
 const unsigned long MPU_SAMPLE_INTERVAL_US = 1000000UL / 50;
 unsigned long next_mpu_sample_us = 0;
 

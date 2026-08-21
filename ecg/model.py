@@ -1,20 +1,19 @@
 """
 The multi-input beat classifier.
 
-Two branches:
-  * a 1D-CNN over the 288-sample beat window  -> learns SHAPE
-      (this is what separates LBBB / RBBB / PVC / normal)
-  * a tiny MLP over three RR-timing features  -> learns RHYTHM
-      (this is the only thing that can find AFib, whose beats look normal)
-concatenated before the classifier head.
+Two branches, concatenated before the head:
+  * a 1D-CNN over the 288-sample window, which learns shape and is what
+    separates LBBB / RBBB / PVC from normal
+  * a small MLP over the RR timing features, which learns rhythm and is the
+    only thing that can find AFib, since AFib beats look normal
 
-No LSTM by design. On a single segmented beat there is almost no long-range
-temporal structure for a recurrent layer to exploit, and recurrence is
-sequential, so it parallelises badly on the UNO Q's Cortex-A53 cores.
+No LSTM. There's almost no long-range temporal structure in a single segmented
+beat for a recurrent layer to use, and recurrence parallelises badly on the
+Cortex-A53.
 
-The RR feature standardisation is stored INSIDE the model as buffers, so the
-exported ONNX consumes raw seconds and the deployment target needs no
-separate constants file to stay in sync.
+The RR feature standardisation lives inside the model as buffers, so the
+exported ONNX takes raw seconds and the board needs no separate constants file
+to keep in sync.
 """
 from __future__ import annotations
 
@@ -37,8 +36,8 @@ def conv_block(cin, cout, k, pool=True):
 
 class ECGNet(nn.Module):
     """
-    use_rr=False builds the CNN-only ablation. The forward signature is
-    unchanged so the same export and evaluation code drives both variants.
+    use_rr=False builds the CNN-only ablation. The forward signature stays the
+    same so one set of export and evaluation code drives both.
     """
 
     def __init__(self, n_classes=C.N_CLASSES, n_features=C.N_FEATURES,
@@ -47,18 +46,22 @@ class ECGNet(nn.Module):
         self.use_rr = use_rr
         self.n_features = n_features
 
+        # Wide kernel first (7) to catch the QRS complex, narrowing after.
         self.cnn = nn.Sequential(
             conv_block(1, 32, 7),     # 288 -> 144
             conv_block(32, 64, 5),    # 144 -> 72
             conv_block(64, 64, 3),    # 72  -> 36
             conv_block(64, 128, 3, pool=False),
         )
+        # Average and max pooled together, so the head sees both the overall
+        # shape and the peak. Max alone lost the T-wave, average alone
+        # flattened the R spike.
         self.avg = nn.AdaptiveAvgPool1d(1)
         self.mx = nn.AdaptiveMaxPool1d(1)
         cnn_out = 128 * 2
 
-        # Standardisation constants for the RR features, filled in by
-        # set_feature_scaler() from TRAIN-set statistics only.
+        # RR standardisation constants, filled in by set_feature_scaler() from
+        # train-set statistics only.
         self.register_buffer("feat_mean", torch.zeros(n_features))
         self.register_buffer("feat_std", torch.ones(n_features))
 
@@ -72,6 +75,8 @@ class ECGNet(nn.Module):
             self.rr = None
             fuse_in = cnn_out
 
+        # Dropout on both layers. With so few patients per rare class the head
+        # overfits fast otherwise.
         self.head = nn.Sequential(
             nn.Dropout(0.3),
             nn.Linear(fuse_in, 64), nn.ReLU(inplace=True),
@@ -93,6 +98,8 @@ class ECGNet(nn.Module):
         h = torch.cat([self.avg(h), self.mx(h)], dim=1).flatten(1)
 
         if self.use_rr:
+            # Standardise here rather than outside, so the exported ONNX takes
+            # raw seconds and needs no constants file alongside it.
             fs = (f - self.feat_mean) / self.feat_std
             h = torch.cat([h, self.rr(fs)], dim=1)
 

@@ -1,18 +1,14 @@
 """
-=============================================================================
-PHASE 1 - MIT-BIH DATA EXPLORATION
-=============================================================================
-Goal of this script (it does NOT train anything):
+MIT-BIH data exploration. Trains nothing, just looks at the data.
 
-  1. Download the MIT-BIH Arrhythmia Database (~100 MB, one time only)
-  2. Count how many beats we have for each of our 5 target classes
-  3. Count how many PATIENTS contribute to each class  <-- the number that
-     actually decides whether we have "enough data"
-  4. Show, numerically, why AFib needs RR-interval timing and not beat shape
-  5. Plot examples so you can see the classes with your own eyes
+  1. Downloads the MIT-BIH Arrhythmia Database (~100 MB, one time)
+  2. Counts beats per class for the 5 target classes
+  3. Counts how many patients contribute to each class, which is the number
+     that decides whether there's actually enough data
+  4. Shows numerically why AFib needs RR timing rather than beat shape
+  5. Plots examples of each class
 
-Run it, then paste me the printed output and describe the two plots.
-=============================================================================
+Figures go to plots/.
 """
 
 import os

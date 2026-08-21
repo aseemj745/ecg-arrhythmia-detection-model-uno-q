@@ -1,22 +1,17 @@
 """
-=============================================================================
-PHASE 1c - LEAD COMPARISON AND ANNOTATION INSPECTION
-=============================================================================
-Answers three questions with data instead of explanation:
+Lead comparison and annotation inspection. Three questions this answers:
 
-  1. Why does our LBBB not look like the textbook picture?
-     -> Figure 7 shows the SAME beats in BOTH recorded leads.
-        A condition can look completely different depending on which
-        electrode view you use.
+  1. Why doesn't our LBBB look like the textbook picture?
+     Figure 7 shows the same beats in both recorded leads. A condition can
+     look completely different depending on the electrode view.
 
   2. Which lead is actually in channel 0 of each record?
-     -> Lead audit table. Most records use MLII in channel 0, but not all,
-        and blindly taking channel 0 in Phase 2 would silently mix leads.
+     The lead audit table. Most records have MLII in channel 0, but not all,
+     so taking channel 0 blindly would mix leads without anyone noticing.
 
   3. What is that unlabelled beat in record 215 around 3.4 seconds?
-     -> Annotation dump prints every beat in a chosen time window with its
-        symbol, class and RR interval.
-=============================================================================
+     The annotation dump prints every beat in a time window with its symbol,
+     class and RR interval.
 """
 
 import os

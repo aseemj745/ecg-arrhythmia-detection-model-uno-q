@@ -1,23 +1,19 @@
 """
-=============================================================================
-PHASE 1b - MIT-BIH EXPLORATION, VISUAL COMPARISON VERSION
-=============================================================================
-Everything here is comparison against NORMAL, because "abnormal" only means
-something next to "normal".
+MIT-BIH exploration, visual version. Everything is compared against normal,
+since "abnormal" only means something next to "normal".
 
 Produces 4 figures:
 
-  Fig 3  Average beat shape: each class drawn ON TOP of normal
-  Fig 4  10-second strips: all 5 classes, one under the other
-  Fig 5  Tachogram: RR interval plotted beat after beat, normal vs AFib
-  Fig 6  Poincare plot: the classic AFib picture
+  Fig 3  Average beat shape, each class drawn on top of normal
+  Fig 4  10-second strips, all 5 classes one under the other
+  Fig 5  Tachogram, RR interval beat after beat, normal vs AFib
+  Fig 6  Poincare plot, the classic AFib picture
 
-And prints CORRECTED rhythm statistics using successive RR differences
-instead of plain standard deviation.
+Also prints rhythm statistics using successive RR differences rather than
+plain standard deviation.
 
-NOTE ON "NOR": that is just this script's shorthand for a normal beat
-during normal sinus rhythm. It is not an official PhysioNet code.
-=============================================================================
+"NOR" here is just this script's shorthand for a normal beat during normal
+sinus rhythm. It isn't an official PhysioNet code.
 """
 
 import os

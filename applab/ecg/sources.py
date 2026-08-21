@@ -1,15 +1,15 @@
 """
 Where samples come from.
 
-One interface, three implementations, so the GUI never needs to know whether
-it is replaying a 1975 tape recording or reading a BioAmp on someone's chest:
+One interface, three implementations, so the GUI doesn't need to know whether
+it's replaying a tape recording or reading a BioAmp on someone's chest:
 
     DatasetSource   replay a held-out MIT-BIH record at wall-clock speed
-    SerialSource    live BioAmp EXG Pill via the UNO Q USB serial bridge
+    SerialSource    live BioAmp EXG Pill over the UNO Q USB serial bridge
     MotionGate      wraps a source and rejects motion-corrupted windows
 
-Every source yields samples in wall-clock time, so playback speed and live
-capture behave the same way from the GUI's point of view.
+Every source yields samples in wall-clock time, so replay and live capture look
+the same to the GUI.
 """
 from __future__ import annotations
 
@@ -39,10 +39,9 @@ class SignalSource:
         """
         Return the next `n` samples immediately, ignoring wall-clock pacing.
 
-        Recorded sources can do this, so the GUI can push the rhythm-feature
-        warmup through before the user sees anything. A live sensor cannot -
-        the future has not happened yet - so it returns nothing and the GUI
-        shows a warmup countdown instead.
+        Recorded sources can do this, which lets the GUI get the rhythm-feature
+        warmup out of the way before the user sees anything. A live sensor
+        can't, so it returns nothing and the GUI shows a countdown instead.
         """
         return np.zeros(0)
 
@@ -59,10 +58,9 @@ class DatasetSource(SignalSource):
     """
     Replays one MIT-BIH record in real time.
 
-    `loop=True` restarts at the end so a demo can be left running.
-    Reports the annotated truth alongside, purely so the GUI can show
-    "annotated: LBBB" next to "predicted: LBBB" - the truth is NEVER fed to
-    the model.
+    loop=True restarts at the end so a demo can be left running. The annotated
+    truth comes along with it only so the GUI can show "annotated: LBBB" next
+    to "predicted: LBBB". It never reaches the model.
     """
 
     def __init__(self, record, speed=1.0, loop=True, start_s=0.0):
@@ -256,17 +254,15 @@ class MotionGate:
     """
     Rejects windows corrupted by movement, using an accelerometer channel.
 
-    NOT yet wired to real hardware - the MPU6050 data path on the UNO Q is
-    still undecided. It is built now, against an injectable motion signal, so
-    the logic is testable and demoable, and so that connecting the real IMU
-    later is a matter of calling `push_motion()` from whatever ends up
-    producing the data.
+    Unused on the UNO Q. This was written against an injectable motion signal
+    before the MPU6050 data path was settled; the board ended up doing the
+    gating on the MCU instead, with applab/python/main.py listening for the
+    sketch's motion_state Bridge event. Kept for the desktop GUI path.
 
-    Scope note, from the project brief: motion gating exists to stop
-    classifying GARBAGE, and to let heart-rate be read in context ("130 bpm
-    is fine while walking"). It is NOT an activity-aware arrhythmia
-    classifier - MIT-BIH has no accelerometer data, so no such claim can be
-    supported.
+    Motion gating is here to stop the model classifying noise, and to let heart
+    rate be read in context (130 bpm is fine while walking). It is not an
+    activity-aware arrhythmia classifier, and there's no way to claim that:
+    MIT-BIH has no accelerometer data to train such a thing on.
     """
 
     def __init__(self, threshold_g=0.25, hold_s=2.0, fs=C.FS):

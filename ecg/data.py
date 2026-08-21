@@ -1,10 +1,9 @@
 """
-MIT-BIH loading, beat labelling, windowing and rhythm-feature extraction.
+MIT-BIH loading, beat labelling, windowing and rhythm features.
 
-The point of this module is that ONE function - `extract_record` - turns a
-record name into (waveforms, features, labels), and the same windowing and
-feature code is reused by the live pipeline, so what the model sees at
-inference is built exactly the way the training data was built.
+One function, `extract_record`, turns a record name into (waveforms, features,
+labels). The live pipeline reuses the same windowing and feature code, so what
+the model sees at inference is built the same way the training data was.
 """
 from __future__ import annotations
 
@@ -13,10 +12,9 @@ from scipy.signal import butter, filtfilt
 
 from . import config as C
 
-# wfdb is imported lazily, inside the functions that read MIT-BIH files.
-# The UNO Q deployment only ever runs the live path - preprocessing,
-# features, inference - and has no dataset to read, so a module-level
-# `import wfdb` would force a dependency onto the board for nothing.
+# wfdb is imported lazily inside the functions that read MIT-BIH files. The
+# board only runs the live path and has no dataset, so importing it up here
+# would push a dependency onto the UNO Q for nothing.
 
 NUL = chr(0)
 
@@ -31,8 +29,8 @@ def _bandpass_coeffs(fs):
 
 
 def bandpass(sig, fs=C.FS):
-    """Zero-phase 0.5-40 Hz bandpass. Zero-phase matters here: a causal
-    filter would shift the R-peak away from its annotated sample."""
+    """Zero-phase 0.5-40 Hz bandpass. Zero-phase matters, a causal filter would
+    shift the R-peak off its annotated sample."""
     if C.BANDPASS is None:
         return sig
     b, a = _bandpass_coeffs(fs)
@@ -40,9 +38,9 @@ def bandpass(sig, fs=C.FS):
 
 
 def znorm(beat):
-    """Per-beat z-normalisation so the model learns SHAPE, not amplitude.
-    Electrode placement and skin impedance change absolute mV wildly between
-    patients, and between MIT-BIH and our BioAmp sensor."""
+    """Per-beat z-normalisation, so the model learns shape and not amplitude.
+    Electrode placement and skin impedance swing the absolute mV a lot between
+    patients, and between MIT-BIH and the BioAmp."""
     sd = beat.std()
     return (beat - beat.mean()) / (sd if sd > 1e-6 else 1e-6)
 
@@ -51,14 +49,13 @@ def polarity_normalise(beat, r_index=C.BEFORE, fs=C.FS):
     """
     Flip the beat if its dominant QRS deflection points down.
 
-    Whether a QRS appears as a tall R or a deep QS depends on where the
-    electrodes sit, not on what the heart is doing. MIT-BIH contains LBBB in
-    both polarities (207 inverted, 109/111 upright), and with only 4 LBBB
-    patients in the whole database there is no way for the model to learn
-    that invariance from data. So we impose it instead.
+    Whether a QRS shows up as a tall R or a deep QS depends on where the
+    electrodes sit, not on what the heart is doing. MIT-BIH has LBBB in both
+    polarities (207 inverted, 109/111 upright), and with only 4 LBBB patients
+    there's no way for the model to learn that invariance, so we impose it.
 
-    The same rule runs unchanged on live BioAmp input, where a swapped
-    electrode pair produces exactly this inversion.
+    The same rule runs unchanged on live input, where a swapped electrode pair
+    gives exactly this inversion.
     """
     if not C.POLARITY_NORMALISE:
         return beat
@@ -73,11 +70,10 @@ def polarity_normalise(beat, r_index=C.BEFORE, fs=C.FS):
 
 def preprocess_beat(window):
     """
-    The single canonical beat preprocessor: z-normalise, then fix polarity.
-    Training data and live sensor data must both go through THIS function,
-    or the model sees a different distribution at inference than it was
-    trained on. Mean removal happens first so the polarity test is not
-    fooled by a DC offset.
+    z-normalise, then fix polarity. Training data and live sensor data both go
+    through this one function, otherwise the model sees a different
+    distribution at inference than it trained on. Mean removal comes first so a
+    DC offset can't fool the polarity test.
     """
     return polarity_normalise(znorm(window))
 
@@ -86,8 +82,8 @@ def preprocess_beat(window):
 # Lead selection
 # --------------------------------------------------------------------------
 def find_lead_channel(header, lead=C.TARGET_LEAD):
-    """Return the channel index holding `lead`, or None. Selecting by name is
-    what stops record 114 (MLII in channel 1) from silently contributing a
+    """Return the channel index holding `lead`, or None. Picking by name is
+    what stops record 114 (MLII in channel 1) from quietly contributing a
     chest-lead view to an otherwise limb-lead dataset."""
     for i, name in enumerate(header.sig_name):
         if name.strip() == lead:
@@ -105,14 +101,14 @@ def label_beats(record_name):
     `cls` is None when the beat is not one of our five classes and should be
     discarded.
 
-    Labelling rule (locked):
-      AFIB          - beat falls inside an "(AFIB" rhythm annotation, whatever
-                      its own symbol says. AFib is irregular TIMING; its beats
-                      mostly look normal, so symbol alone can never find it.
-      LBBB/RBBB/PVC - decided by beat symbol L / R / V.
-      NOR           - symbol N AND the prevailing rhythm is normal or unset.
-                      Normal-LOOKING beats inside bigeminy, flutter and other
-                      abnormal rhythms are dropped, not called normal.
+    Labelling rules:
+      AFIB          - beat sits inside an "(AFIB" rhythm annotation, whatever
+                      its own symbol says. AFib is irregular timing and its
+                      beats mostly look normal, so the symbol can't find it.
+      LBBB/RBBB/PVC - beat symbol L / R / V.
+      NOR           - symbol N and the prevailing rhythm is normal or unset.
+                      Normal-looking beats inside bigeminy, flutter and other
+                      abnormal rhythms get dropped rather than called normal.
     """
     import wfdb
     ann = wfdb.rdann(str(C.DATA_DIR / record_name), "atr")
@@ -152,13 +148,13 @@ def rhythm_features(window_rr, rr_prev, rr_prev2):
     """
     Turn a window of recent RR intervals into the model's numeric input.
 
-    `window_rr` is the last RR_LOCAL_WINDOW intervals INCLUDING the current
-    one, oldest first; `rr_prev` is the current interval and `rr_prev2` the
-    one before it.
+    `window_rr` is the last RR_LOCAL_WINDOW intervals including the current
+    one, oldest first. `rr_prev` is the current interval, `rr_prev2` the one
+    before it.
 
-    Split out as its own function because the live pipeline calls exactly
-    this from a ring buffer - training and deployment must not drift apart.
-    Returns None when the window is not usable yet.
+    Its own function because the live pipeline calls this same code from a ring
+    buffer, so training and deployment can't drift apart. Returns None when the
+    window isn't usable yet.
     """
     w = np.asarray(window_rr, dtype=np.float64)
     if len(w) < C.RR_LOCAL_WINDOW or not np.all(np.isfinite(w)):
@@ -172,13 +168,12 @@ def rhythm_features(window_rr, rr_prev, rr_prev2):
     prior = w[:-1]                      # window excluding the current beat
     diffs = np.diff(w)
 
-    # Ectopy-robust copy of the window. A PVC injects a short interval and a
-    # compensatory long one - two outliers - which look exactly like AFib to
-    # a plain rmssd. Replacing intervals more than ECTOPIC_TOL from the
-    # median flattens that pair while leaving AFib untouched, because AFib
-    # irregularity is broad dispersion rather than a couple of outliers.
-    # Without this, record 233 (28% PVC burden) had 93% of its normal beats
-    # called AFib.
+    # Ectopy-robust copy. A PVC adds a short interval and a compensatory long
+    # one, and those two outliers look just like AFib to a plain rmssd.
+    # Median-replacing anything more than ECTOPIC_TOL out flattens that pair
+    # but leaves AFib alone, since AFib is broad dispersion rather than a
+    # couple of outliers. Without this, 93% of record 233's normal beats came
+    # back as AFib.
     clean = np.where(np.abs(w - median) / median > C.ECTOPIC_TOL, median, w)
     clean_diffs = np.diff(clean)
 
@@ -200,8 +195,8 @@ def rr_features(samples, fs=C.FS):
     """
     Build the causal timing features for a whole series of R-peak positions.
 
-    Returns (features, valid_mask); the first RR_LOCAL_WINDOW+1 beats of a
-    record are marked invalid because their window is not filled yet.
+    Returns (features, valid_mask). The first RR_LOCAL_WINDOW+1 beats of a
+    record are marked invalid, their window isn't filled yet.
     """
     n = len(samples)
     feats = np.zeros((n, C.N_FEATURES), dtype=np.float32)

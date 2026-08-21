@@ -1,6 +1,6 @@
 """
-Central configuration. Every locked project decision lives here so that the
-scripts read like a recipe and there is exactly one place to change a choice.
+All the fixed project decisions in one place, so the scripts stay readable and
+there is only one spot to change any choice.
 """
 from pathlib import Path
 
@@ -18,38 +18,30 @@ for _d in (DATASET_DIR, MODEL_DIR, REPORT_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 # --------------------------------------------------------------------------
-# Signal / windowing  (locked)
+# Signal / windowing
 # --------------------------------------------------------------------------
 FS = 360                      # MIT-BIH native sampling rate
 BEFORE = int(0.30 * FS)       # 108 samples before R-peak
 AFTER = int(0.50 * FS)        # 180 samples after R-peak
 WINDOW = BEFORE + AFTER       # 288 samples per beat
 
-# Lead selection is BY NAME, never by channel index. Record 114 puts MLII in
-# channel 1; 102/104 have no MLII at all (they are paced records we exclude).
+# Pick the lead by name, not by channel index. Record 114 has MLII in channel 1.
 TARGET_LEAD = "MLII"
 
-# Bandpass applied to the whole record before beat extraction.
-# Not in the original brief, but the BioAmp EXG Pill has a ~0.5-48 Hz analog
-# passband of its own, so filtering MIT-BIH the same way narrows the gap
-# between training data and the deployment sensor. Set BANDPASS = None to
-# disable and retrain if you want to compare.
+# Matched to the BioAmp EXG Pill's own ~0.5-48 Hz analog passband, so the
+# training data looks like what the sensor gives us. Set to None and retrain
+# to compare.
 BANDPASS = (0.5, 40.0)        # Hz, 4th-order Butterworth, zero-phase
 BANDPASS_ORDER = 4
 
-# Flip each beat so its dominant QRS deflection points UP.
-# MIT-BIH records the same condition in opposite polarities depending on
-# electrode placement - LBBB in record 207 is inverted relative to 109/111,
-# which alone was enough to make held-out LBBB unlearnable. Normalising
-# polarity removes a nuisance dimension the tiny LBBB patient count cannot
-# cover, and it is equally valid on the deployment side: swapping two BioAmp
-# electrodes inverts the trace in exactly the same way.
+# Flip each beat so the dominant QRS deflection points up. MIT-BIH has the same
+# condition in both polarities (LBBB in 207 is inverted vs 109/111), which on
+# its own made held-out LBBB unlearnable.
 POLARITY_NORMALISE = True
-POLARITY_WINDOW_MS = 45       # search +/- this around the R-peak for the
-                              # dominant deflection
+POLARITY_WINDOW_MS = 45       # search +/- this around the R-peak
 
 # --------------------------------------------------------------------------
-# Classes  (locked)
+# Classes
 # --------------------------------------------------------------------------
 CLASSES = ["NOR", "LBBB", "RBBB", "PVC", "AFIB"]
 CLASS_TO_IDX = {c: i for i, c in enumerate(CLASSES)}
@@ -63,24 +55,23 @@ CLASS_DESCRIPTIONS = {
     "AFIB": "Beat during atrial fibrillation",
 }
 
-# Beat annotation symbols that mark an actual heartbeat (vs a rhythm or a
-# signal-quality note). Used to build the RR series.
+# Symbols that mark an actual heartbeat, as opposed to a rhythm or signal
+# quality note. Used to build the RR series.
 BEAT_SYMBOLS = {
     'N', 'L', 'R', 'B', 'A', 'a', 'J', 'S', 'V', 'r',
     'F', 'e', 'j', 'n', 'E', '/', 'f', 'Q', '?',
 }
 
-# Locked labelling rule: a beat inside an "(AFIB" rhythm annotation is AFIB
-# no matter what its own symbol says, because AFib is a rhythm phenomenon and
-# most of its beats carry the symbol 'N'. Flip to False to instead let
-# L/R/V morphology symbols win over the rhythm annotation.
+# A beat inside an "(AFIB" rhythm annotation is AFIB whatever its own symbol
+# says, because most AFib beats are marked 'N'. False lets the L/R/V morphology
+# symbols win instead.
 AFIB_OVERRIDES_ALL_SYMBOLS = True
 
 # --------------------------------------------------------------------------
-# Records  (locked)
+# Records
 # --------------------------------------------------------------------------
-# Paced beats change QRS shape completely and "paced" is not one of our
-# classes. Standard exclusion in the ECG literature.
+# Paced records. Pacing changes QRS shape completely and paced is not one of
+# our classes. Standard exclusion in the literature.
 EXCLUDED_RECORDS = ["102", "104", "107", "217"]
 
 ALL_RECORDS = [
@@ -97,61 +88,41 @@ USABLE_RECORDS = [r for r in ALL_RECORDS if r not in EXCLUDED_RECORDS]
 # --------------------------------------------------------------------------
 # Patient-level split  (run step1b_check_split.py to see the resulting table)
 # --------------------------------------------------------------------------
-# NEVER a random beat-level split: beats from one patient in both train and
-# test would let the model memorise that patient's heartbeat instead of
-# learning the class, and the score would be a lie.
+# Never a random beat-level split. The same patient in both train and test lets
+# the model memorise that person's heartbeat instead of learning the class.
 #
-# The split is constrained by how few patients carry the rare classes, so it
-# was built rare-class-first:
-#   LBBB exists in only 4 patients (109, 111, 207, 214) -> 214 test,
-#        109 val, 111+207 train. Test LBBB therefore rests on a SINGLE
-#        patient. That is a real limitation, stated rather than hidden.
-#   RBBB exists in 6 (118, 124, 207, 212, 231, 232) -> 231+232 test,
-#        118 val, 124+207+212 train.
-#   AFIB exists in 7 (201, 202, 203, 210, 219, 221, 222) -> 202+221 test,
-#        219 val, 201+203+210+222 train.
-#   NOR and PVC are spread over 30+ patients, so they fill in freely.
+# Built rare-class-first, since so few patients carry the rare classes:
+#   LBBB is in only 4 patients (109, 111, 207, 214) -> 214 test, 109 val,
+#        111+207 train. So test LBBB rests on one patient.
+#   RBBB is in 6 (118, 124, 207, 212, 231, 232) -> 231+232 test, 118 val.
+#   AFIB is in 7 (201, 202, 203, 210, 219, 221, 222) -> 202+221 test, 219 val.
+#   NOR and PVC are spread over 30+ patients so they fill in freely.
 #
-# Record 114 is deliberately in TEST: it is the one record whose MLII sits in
-# channel 1, so if lead-by-name selection ever regressed to lead-by-index,
-# the test score would visibly break instead of quietly rotting.
-
-# Held out from training AND validation. Source of the final numbers and of
-# the "unseen patient" clips played in the GUI demo.
+# 114 is in test on purpose: it is the one record with MLII in channel 1, so a
+# regression back to lead-by-index would break the test score visibly.
 TEST_RECORDS = ['114', '119', '202', '214', '221', '231', '232', '233', '234']
 
-# Model selection / early stopping only. Also unseen by the optimiser.
+# Checkpoint selection only. Never seen by the optimiser.
 VAL_RECORDS = ['109', '118', '205', '208', '219']
 
 TRAIN_RECORDS = [r for r in USABLE_RECORDS
                  if r not in TEST_RECORDS and r not in VAL_RECORDS]
 
 # --------------------------------------------------------------------------
-# GUI demo clips - all drawn from TEST_RECORDS, i.e. patients the model has
-# never seen. The top pane of the GUI plays the healthy record; the bottom
-# pane plays one of the arrhythmia records.
+# GUI demo clips
 # --------------------------------------------------------------------------
-# fold is either 'test' (never seen at all) or 'val' (never trained on, but
-# used to pick the checkpoint). Both are legitimate demo material; the GUI
-# labels which is which so a viewer is never misled about how unseen a
-# recording really is.
-# NOTHING IN THESE TWO LISTS MAY COME FROM TRAIN_RECORDS.
-# step1b_check_split.py enforces this and fails the build if it is violated.
-# Showing the model a recording it was fitted on and calling that a
-# demonstration is the exam-with-the-answer-sheet problem; the numbers would
-# be meaningless and a reviewer who checked would be right to discount the
-# whole result.
-DEMO_ONLY_TEST_RECORDS = True     # enforced by step1b_check_split.py
+# Nothing in these lists may come from TRAIN_RECORDS. step1b_check_split.py
+# enforces that and fails the build otherwise. Demoing a record the model was
+# fitted on would make the whole thing meaningless.
+DEMO_ONLY_TEST_RECORDS = True
 
 DEMO_HEALTHY = [
     # record, fold, note
     ('234', 'test', '2689 normal vs 3 ectopic - essentially clean'),
     ('114', 'test', '97.7% normal; also the MLII-in-channel-1 record'),
-    # Validation records - never trained on, but they did influence which
-    # epoch's checkpoint was kept. Excluded from the demo so that every
-    # waveform on camera is provably, completely unseen. Re-add them (and set
-    # DEMO_ONLY_TEST_RECORDS = False) if you want more variety and are willing
-    # to explain the distinction:
+    # Val records are never trained on, but they did pick the checkpoint, so
+    # they are left out to keep every demo waveform completely unseen. Re-add
+    # them (and set DEMO_ONLY_TEST_RECORDS = False) for more variety:
     #   ('205', 'val', '97.3% normal, faster sinus rhythm'),
 ]
 DEMO_HEALTHY_RECORD = DEMO_HEALTHY[0][0]
@@ -160,18 +131,15 @@ DEMO_ARRHYTHMIA = [
     # record, headline class, fold, note
     ('214', 'LBBB', 'test', '1992 LBBB + 255 PVC'),
     ('231', 'RBBB', 'test', '1242 RBBB, sustained throughout'),
-    # 232 removed from the demo list. Most of its beats are atrial
-    # (symbols 'A'/'a'), a class this model does not have, so the
-    # dashboard spends the clip labelling them as whatever of the five
-    # they resemble - it demonstrates a gap in the class set rather
-    # than the model's RBBB detection, which 231 shows cleanly.
-    # It REMAINS in TEST_RECORDS, so it still counts against the
-    # reported test metrics; it is only no longer offered as a demo.
+    # 232 dropped from the demo list: most of its beats are atrial ('A'/'a'),
+    # a class we don't have, so the dashboard just labels them as whichever of
+    # the five they resemble. Still in TEST_RECORDS, so it still counts in the
+    # reported metrics.
     ('119', 'PVC',  'test', '442 PVC in bigeminy - clean, regular pattern'),
     ('233', 'PVC',  'test', '826 PVC, 28% burden - the hard case'),
     ('221', 'AFIB', 'test', '2346 AFib beats, sustained'),
     ('202', 'AFIB', 'test', 'AFib episodes alternating with normal rhythm'),
-    # Validation records, excluded for the same reason as above:
+    # Val records, left out for the same reason as above:
     #   ('109', 'LBBB', 'val', '2480 LBBB, textbook morphology'),
     #   ('118', 'RBBB', 'val', '2155 RBBB'),
     #   ('208', 'PVC',  'val', '986 PVC, frequent and irregular'),
@@ -180,42 +148,36 @@ DEMO_ARRHYTHMIA = [
 DEMO_ARRHYTHMIA_RECORDS = {cls: rec for rec, cls, fold, _ in DEMO_ARRHYTHMIA
                            if fold == 'test'}
 
-# Seconds of signal fed through the analyser BEFORE the display starts, so a
-# replay is already past the rhythm-feature warmup when the user sees it.
-# Live capture cannot do this - the warmup there is real and is shown as a
-# countdown instead.
+# Seconds fed through the analyser before the display starts, so a replay is
+# already past the rhythm-feature warmup when the user sees it. Live capture
+# can't do this, so there the warmup is shown as a countdown instead.
 DEMO_PRIME_S = 20.0
 
 # --------------------------------------------------------------------------
-# Numeric (rhythm) features  (locked: multi-input fusion model)
+# Numeric (rhythm) features
 # --------------------------------------------------------------------------
-# Every feature is CAUSAL - current and previous beats only, never a future
-# one - so this exact code runs in real time on the UNO Q from a 10-entry RR
-# ring buffer, with no need to wait for the next beat to arrive.
+# All causal: current and previous beats only, never a future one, so the same
+# code runs live on the UNO Q off a 10-entry ring buffer.
 #
-# The first three describe THIS beat's timing (what a PVC disturbs); the last
-# five describe the IRREGULARITY of the last 10 beats (what AFib is). Three
-# per-beat features alone gave AFIB F1 0.46, because an AFib beat in
-# isolation genuinely looks and times like a normal one - irregularity only
-# exists across a window. This is still one fused model, as decided; only the
-# feature vector grew.
+# First three are this beat's timing (what a PVC disturbs), the rest describe
+# irregularity over the last 10 beats (what AFib is). Per-beat features alone
+# gave AFIB F1 0.46, since an AFib beat in isolation looks normal.
 FEATURE_NAMES = [
     "rr_prev",         # this RR interval, seconds
     "rr_delta",        # change from the previous RR interval
     "rr_ratio_local",  # this RR / mean of previous 10, scale-free
     "rmssd",           # RMS of successive RR differences over the window
-    "cv_rr",           # std/mean of the window - relative dispersion
+    "cv_rr",           # std/mean of the window
     "pnn50",           # fraction of successive diffs above 50 ms
     "rr_range",        # (max-min)/mean of the window
-    "mad_median",      # mean abs deviation from the window median / median
+    "mad_median",      # mean abs deviation from window median / median
     "rmssd_clean",     # rmssd after ectopic intervals are median-replaced
     "cv_rr_clean",     # cv    after ectopic intervals are median-replaced
 ]
 N_FEATURES = len(FEATURE_NAMES)
 RR_LOCAL_WINDOW = 10          # beats in the irregularity window
-RR_CLIP = (0.20, 3.00)        # seconds; anything outside is annotation noise
-ECTOPIC_TOL = 0.25            # an RR more than 25% off the window median is
-                              # treated as ectopic by the *_clean features
+RR_CLIP = (0.20, 3.00)        # seconds; outside this is annotation noise
+ECTOPIC_TOL = 0.25            # RR more than 25% off the median counts as ectopic
 
 # --------------------------------------------------------------------------
 # Training
@@ -228,24 +190,22 @@ WEIGHT_DECAY = 1e-4
 LABEL_SMOOTHING = 0.05
 AUGMENT = True                # see BeatDataset in step2_train.py
 
-# Class-weight exponent for the loss. 1.0 = full inverse frequency, which
-# over-corrects here: it made the model fire AFIB at 2,000+ normal beats to
-# buy recall. 0.5 (inverse square root) keeps the rare classes trainable
-# without wrecking NOR precision.
+# Class-weight exponent for the loss. Dropped from 1.0 (full inverse frequency)
+# to 0.5, because at 1.0 the model fired AFIB at 2000+ normal beats to buy
+# recall and wrecked NOR precision.
 CLASS_WEIGHT_POWER = 0.5
 
-# Weight-EMA decay. ~4 epochs of effective averaging at 243 steps/epoch.
+# Weight-EMA decay. About 4 epochs of averaging at 243 steps/epoch.
 EMA_DECAY = 0.999
 
 # --------------------------------------------------------------------------
 # Episode detection (GUI highlighting + Excel logging)
 # --------------------------------------------------------------------------
-# How many CONSECUTIVE beats of one class before it counts as a finding.
-# This is per-class on purpose. A PVC is a single ectopic beat - demanding a
-# run of three would mean never reporting one, which is exactly the bug that
-# made record 119's 17 PVCs vanish from the episode list. Sustained rhythms
-# are the opposite: one stray LBBB call inside normal sinus is a
-# misclassification, three in a row is a finding.
+# Consecutive beats of one class needed before it counts as a finding.
+# Per-class on purpose: a PVC is a single ectopic beat, so requiring three
+# meant never reporting one (record 119's 17 PVCs vanished from the list).
+# Sustained rhythms are the other way round, one stray LBBB call inside normal
+# sinus is just a misclassification.
 MIN_EPISODE_BEATS = {
     "PVC": 1,
     "LBBB": 3,
@@ -254,27 +214,19 @@ MIN_EPISODE_BEATS = {
 }
 DEFAULT_MIN_EPISODE_BEATS = 3
 
-# Beats below this confidence are shown greyed in the GUI and marked
-# "low confidence" in the Excel log rather than being silently trusted.
+# Beats below this are greyed in the GUI and marked low confidence in the log.
 LOW_CONFIDENCE = 0.50
 
-# Minimum mean confidence before an episode is FLAGGED and logged.
-#
-# This is an alerting operating point, not a change to the model, and the
-# thresholds were measured on the VALIDATION patients (never on test).
-# They are per-class because the model turns out to be badly calibrated in
-# class-specific ways - a single global threshold would be actively harmful:
-#
-#   PVC   gating works: precision 0.272 -> 0.594 at 0.50, recall still 0.834.
-#         PVC is the over-fired class, so this is where a gate earns its
-#         keep and it is the reason the log is not drowned in false PVCs.
-#   LBBB  gating is destructive: nearly every correct LBBB call sits below
-#         0.45 (recall 0.675 -> 0.025). Confident-but-low-probability.
-#   AFIB  gating is BACKWARDS: precision 0.564 -> 0.409 as the threshold
-#         rises, because the most confident AFIB calls come from extreme RR
-#         irregularity, which is exactly what a PVC-heavy normal record
-#         looks like.
-#   RBBB  already 0.996 precision ungated; a gate only costs recall.
+# Minimum mean confidence before an episode is logged. Measured on the
+# validation patients, never on test, and per-class because the model is
+# badly calibrated in class-specific ways:
+#   PVC   gating helps: precision 0.272 -> 0.594 at 0.50, recall still 0.834
+#   LBBB  gating destroys it: recall 0.675 -> 0.025, most correct calls are
+#         below 0.45
+#   AFIB  gating runs backwards: precision 0.564 -> 0.409 as the threshold
+#         rises, since the most confident AFIB calls come from extreme RR
+#         irregularity, which is what a PVC-heavy record looks like
+#   RBBB  already 0.996 precision ungated, a gate only costs recall
 MIN_EPISODE_CONFIDENCE = {
     "PVC": 0.50,
     "LBBB": 0.0,
@@ -282,44 +234,28 @@ MIN_EPISODE_CONFIDENCE = {
     "AFIB": 0.0,
 }
 
-# Single stricter gate applied to EVERY class when the input is a live
-# sensor rather than the database. The per-class map above was measured on
-# MIT-BIH validation patients, where the model is well separated (mean
-# confidence 0.71) and gating LBBB/AFIB actively hurts. Live BioAmp input is
-# a different regime: measured mean confidence ~0.40 against a 0.20 chance
-# level, because beat-to-beat morphology is ~2.5x more variable than MIT-BIH
-# (std 0.28 vs 0.11) once real electrode noise, contact drift and movement
-# are present. Ungated, that near-chance output reaches the dashboard as
-# findings - a healthy resting subject produced 5 false AFIB/PVC episodes.
+# One stricter gate for every class when the input is a live sensor. The map
+# above was measured on MIT-BIH, where mean confidence is 0.71; on live BioAmp
+# input it's about 0.40 against a 0.20 chance level, because real electrode
+# noise makes beat morphology ~2.5x more variable (std 0.28 vs 0.11). Ungated,
+# a healthy resting subject produced 5 false AFIB/PVC episodes.
 #
-# Measured on a real 23.6 s BioAmp capture from a healthy resting subject
-# vs MIT-BIH record 119 (24 genuine PVC episodes):
-#   gate 0.00 (per-class map) -> 5 false live episodes, 24/24 PVC kept
-#   gate 0.55                 -> 0 false live episodes, 24/24 PVC kept
-#   gate 0.65                 -> 0 false live episodes, 23/24 PVC kept
-# 0.55 is the operating point: it removes every false positive measured
-# while still costing no genuine detection.
-#
-# This is an alerting threshold, not a model change. It does not make the
-# model better on noisy input - it makes it decline to guess. The real fix
-# for live accuracy is signal quality (electrode contact, shielding) and
-# eventually training on live-domain data.
+# Measured on a 23.6s BioAmp capture vs record 119 (24 real PVC episodes):
+#   gate 0.00 -> 5 false live episodes, 24/24 PVC kept
+#   gate 0.55 -> 0 false live episodes, 24/24 PVC kept
+#   gate 0.65 -> 0 false live episodes, 23/24 PVC kept
+# So 0.55. This doesn't make the model better on noisy input, it just makes it
+# decline to guess.
 LIVE_MIN_EPISODE_CONFIDENCE = 0.55
 
-# A sustained arrhythmia is chopped into chunks of at most this many seconds.
-# Without it, a patient who is in RBBB or AFib for the whole recording
-# produces one episode that never ends, so it is never finalised, never
-# logged and never shaded - the single most important case silently produces
-# nothing. Chunking also keeps the Excel log to a readable number of rows.
+# Cap on episode length. Without it a patient who is in RBBB or AFib for the
+# whole recording produces one episode that never ends, so it never gets
+# finalised, logged or shaded.
 MAX_EPISODE_S = 30.0
 
-# Same idea, but for the on-device demo replay. A sustained-rhythm record
-# (231 is RBBB throughout, 221 is AFib throughout) is ONE continuous run, so
-# at 30 s chunks a 90 s replay produces about three rows and the first one
-# only lands after 30 s of watching. That reads as "RBBB is not logging"
-# when the model is in fact calling every beat correctly - the episode just
-# has not finalised yet. 10 s chunks give roughly nine rows over the same
-# replay and the first within ten seconds, which is what makes the demo
-# legible. Purely a reporting granularity: it changes how a run is sliced
-# for display, never which beats are detected or what they are called.
+# Same thing for the on-device demo replay, but shorter. At 30s a 90s replay of
+# a sustained rhythm gives about three rows, the first only after 30s of
+# watching, which reads as "RBBB isn't logging". 10s gives ~9 rows and the
+# first within ten seconds. Display granularity only, it doesn't change which
+# beats are detected.
 DEMO_MAX_EPISODE_S = 10.0

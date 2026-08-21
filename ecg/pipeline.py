@@ -1,14 +1,13 @@
 """
-The one inference path.
+The inference path.
 
-Everything downstream - the GUI's dataset playback, the GUI's live mode, the
-Excel logger, and eventually the UNO Q bridge - calls ECGAnalyzer.analyse().
-There is deliberately no second copy of the preprocessing logic anywhere,
-because the classic way a model like this fails in the field is that the live
-path normalises or windows a beat slightly differently from the training path
-and nobody notices until the numbers are quietly wrong.
+Everything downstream calls ECGAnalyzer.analyse(): the GUI's dataset playback
+and live mode, the Excel logger and the UNO Q app. There is no second copy of
+the preprocessing anywhere, because the usual way a model like this fails is
+that the live path windows or normalises a beat slightly differently from the
+training path and nobody notices.
 
-Input may be at any sample rate; it is resampled to the model's 360 Hz.
+Input can be at any sample rate, it gets resampled to the model's 360 Hz.
 """
 from __future__ import annotations
 
@@ -41,7 +40,7 @@ class BeatResult:
 
 
 class ECGAnalyzer:
-    """Wraps the INT8 ONNX model plus the exact preprocessing it expects."""
+    """The INT8 ONNX model plus the preprocessing it expects."""
 
     def __init__(self, model_path=None, providers=("CPUExecutionProvider",)):
         self.model_path = str(model_path or (C.MODEL_DIR / "model_int8.onnx"))
@@ -51,10 +50,8 @@ class ECGAnalyzer:
     # ------------------------------------------------------------------
     @staticmethod
     def to_model_rate(sig, fs):
-        """Resample to 360 Hz. The BioAmp bridge streams 125 Hz (confirmed
-        empirically from real capture timestamps, 2026-08-20 - not the
-        250 Hz originally assumed), CPSC is 500; the model only ever sees
-        360."""
+        """Resample to 360 Hz. The BioAmp bridge streams 125 and CPSC is 500,
+        but the model only ever sees 360."""
         sig = np.asarray(sig, dtype=np.float64)
         if fs == C.FS:
             return sig, C.FS
@@ -67,9 +64,9 @@ class ECGAnalyzer:
         """
         Classify every complete beat in `sig`.
 
-        r_peaks : optional, in samples of the ORIGINAL `sig` before
-                  resampling. Pass MIT-BIH annotations to isolate model error
-                  from detector error, or leave None to run the full
+        r_peaks : optional, in samples of the original `sig` before resampling.
+                  Pass MIT-BIH annotations to separate model error from
+                  detector error, or leave None to run the full
                   detect-then-classify path the hardware uses.
 
         Returns (beats, signal_360hz).
@@ -137,17 +134,16 @@ class StreamAnalyzer:
     """
     Feed samples in, get newly-classified beats out.
 
-    Used by BOTH the GUI's dataset replay and live sensor mode. Replay could
-    have been done by analysing the whole record up front and animating the
-    answers, which would look identical on screen - but then the demo would
-    not be exercising the code path the device actually runs, and any bug
-    that only appears when beats arrive incrementally would stay hidden until
-    the hardware demo. So replay streams too.
+    Used by both the GUI's dataset replay and live sensor mode. Replay could
+    have analysed the whole record up front and animated the answers, which
+    would look the same on screen, but then the demo wouldn't exercise the code
+    path the device runs and any bug that only shows up when beats arrive
+    incrementally would stay hidden until the hardware demo.
 
-    Holds a trailing buffer, re-analyses it periodically, and emits only
-    beats it has not emitted before. A beat is withheld until it sits far
-    enough from the buffer's leading edge that its full window and its RR
-    history are available - the same latency the real device has.
+    Keeps a trailing buffer, re-analyses it periodically, and only emits beats
+    it hasn't emitted before. A beat is held back until it's far enough from
+    the leading edge for its full window and RR history to exist, which is the
+    same latency the real device has.
     """
 
     def __init__(self, analyzer, fs=C.FS, buffer_s=20.0, reanalyse_s=0.5):
@@ -194,24 +190,21 @@ class StreamAnalyzer:
 
         beats, _ = self.analyzer.analyse(self.buf, self.fs)
 
-        # CAREFUL: analyse() resamples to the model's 360 Hz internally, so
-        # every b.sample it returns indexes the RESAMPLED buffer, while
-        # self.buf and self.offset are in INPUT samples. Adding one to the
-        # other silently produced negative durations and impossible heart
-        # rates as soon as the input was not already 360 Hz - which is to
-        # say, on every real BioAmp stream. Convert before combining.
+        # analyse() resamples to 360 Hz internally, so its b.sample values
+        # index the resampled buffer while self.buf and self.offset are in
+        # input samples. Mixing the two gave negative durations and impossible
+        # heart rates on any input that wasn't already 360 Hz, i.e. every real
+        # BioAmp stream. Convert before combining.
         to_input = self.fs / C.FS
         n_model = len(self.buf) / to_input
         edge_model = n_model - C.AFTER      # incomplete windows live past here
 
-        # Exact-index dedup is not enough. Each analysis sees a different
-        # slice of signal, so Pan-Tompkins' adaptive threshold can place the
-        # same physical beat one or two samples away from where it placed it
-        # last time; the shifted copy then looks like a brand new beat and
-        # gets emitted again, out of order, which is what produced episodes
-        # whose end preceded their start. A refractory gate fixes it for a
-        # physiological reason rather than a numerical one: two beats cannot
-        # be 200 ms apart, so anything that close is the same beat again.
+        # Dedup on exact index isn't enough. Each analysis sees a different
+        # slice, so the adaptive threshold can place the same beat a sample or
+        # two from where it put it last time, and the shifted copy gets emitted
+        # again out of order. That's what produced episodes whose end came
+        # before their start. Gate on the refractory period instead: two beats
+        # can't be 200 ms apart, so anything closer is the same beat.
         min_gap = int(0.20 * self.fs)
         new = []
         for b in sorted(beats, key=lambda x: x.sample):
@@ -239,12 +232,9 @@ class StreamAnalyzer:
 # --------------------------------------------------------------------------
 @dataclass
 class Episode:
-    """A run of consecutive abnormal beats sharing a label.
-
-    The GUI marks episodes rather than individual beats, and the Excel log
-    gets one row per episode. How many beats it takes to count is per-class -
-    see C.MIN_EPISODE_BEATS.
-    """
+    """A run of consecutive abnormal beats with the same label. The GUI marks
+    episodes rather than individual beats and the log gets one row each. How
+    many beats it takes is per-class, see C.MIN_EPISODE_BEATS."""
     label: str
     start_time: float
     end_time: float
@@ -268,27 +258,18 @@ def group_episodes(beats, min_beats=None, min_confidence=None,
     """
     Collapse consecutive same-label abnormal beats into episodes.
 
-    min_beats : None uses the per-class thresholds in config (PVC fires on a
-                single beat, sustained rhythms need three). Pass an int to
-                override uniformly.
+    min_beats : None uses the per-class thresholds in config (PVC fires on one
+                beat, sustained rhythms need three). Pass an int to override.
 
-    min_confidence : None uses the per-class MIN_EPISODE_CONFIDENCE map,
-                which was measured on MIT-BIH VALIDATION patients and is
-                deliberately permissive (LBBB/RBBB/AFIB gate at 0.0, because
-                on clean database signal a gate there costs far more recall
-                than it buys precision).
+    min_confidence : None uses the per-class MIN_EPISODE_CONFIDENCE map, which
+                was measured on MIT-BIH validation patients and is permissive
+                on purpose, since on clean database signal a gate costs more
+                recall than it buys precision.
 
-                That reasoning does NOT transfer to live sensor input. On a
-                real BioAmp capture the model's mean confidence is ~0.40 -
-                barely above the 0.20 chance level for 5 classes - because
-                the beat-to-beat morphology is ~2.5x more variable than
-                MIT-BIH (0.28 vs 0.11 std). Ungated, that near-chance output
-                is reported as findings: a healthy resting subject produced
-                5 false AFIB/PVC episodes. Pass a float here (live mode uses
-                C.LIVE_MIN_EPISODE_CONFIDENCE) to apply one stricter gate to
-                every class. Measured: at 0.55 those 5 false episodes drop to
-                0 while all 24 genuine PVC episodes in MIT-BIH record 119 are
-                still reported, so this costs no measurable real recall.
+                That doesn't hold for live sensor input, where mean confidence
+                is about 0.40 against a 0.20 chance level. Pass a float (live
+                mode passes C.LIVE_MIN_EPISODE_CONFIDENCE) to apply one
+                stricter gate to every class.
     """
     episodes, run = [], []
 

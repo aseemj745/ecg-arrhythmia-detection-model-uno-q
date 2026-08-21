@@ -10,12 +10,9 @@ appends it to an .xlsx workbook and saves.
 Run standalone to test:
     echo {"condition":"PVC","start_s":1.0,"end_s":1.0,"n_beats":1} | python log_worker.py
 
-Why a separate process rather than a function call in the GUI:
-  * a slow or failed disk write can never stall the plot redraw loop
-  * the workbook is closed and re-saved per batch, so the file on disk stays
-    valid even if the GUI is killed mid-demo
-  * it mirrors how the UNO Q side runs its analysis module out-of-process,
-    so the same logger can later be pointed at the board's output
+A separate process rather than a function call, so a slow or failed disk write
+can't stall the plot redraw loop, and so the workbook stays valid on disk even
+if the GUI is killed mid-demo.
 """
 from __future__ import annotations
 

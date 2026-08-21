@@ -5,10 +5,10 @@ STEP 4 - Full evaluation of the deployed INT8 model.
 
 Reports, on the held-out patients only:
   1. per-class precision / recall / F1 and the confusion matrix
-  2. per-RECORD accuracy, which is what a per-patient demo actually shows
-  3. normal-vs-abnormal screening performance, the number the GUI's
-     "flag this window" behaviour is really driven by
-  4. single-beat inference latency, to justify the real-time claim
+  2. per-record accuracy, since that's what a per-patient demo shows
+  3. normal-vs-abnormal screening performance, which is what drives the GUI's
+     flagging behaviour
+  4. single-beat inference latency, for the real-time claim
   5. the CNN-only vs CNN+RR ablation, if that run exists
 """
 from __future__ import annotations

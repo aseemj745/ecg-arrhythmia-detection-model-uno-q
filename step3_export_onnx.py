@@ -7,12 +7,11 @@ STEP 3 - Export to ONNX and quantise to INT8.
 Produces, in artifacts/models/:
     <tag>_fp32.onnx     portable float model
     <tag>_int8.onnx     statically quantised, this is what ships to the UNO Q
-and verifies numerically that the ONNX graphs agree with PyTorch before
-declaring success.
+It also checks the ONNX outputs against PyTorch before reporting success.
 
-Static (calibrated) quantisation is used rather than dynamic: dynamic
-quantisation leaves Conv layers in float, and Conv is essentially the whole
-model here, so it would save almost nothing.
+Static (calibrated) quantisation rather than dynamic. Dynamic leaves Conv
+layers in float, and Conv is nearly the whole model here, so it would save
+almost nothing.
 """
 from __future__ import annotations
 

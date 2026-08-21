@@ -1,10 +1,9 @@
 // ECG Arrhythmia Classifier - dashboard client.
 //
-// Talks to python/main.py over the App Lab WebUI Brick (socket.io under the
-// hood, wrapped by libs/arduino.js). The Python side pushes a full state
-// snapshot on the "state" event roughly every 400ms; this file only draws
-// whatever it is handed - it does not classify or interpret anything, all
-// of that already happened on the board before this message was sent.
+// Talks to python/main.py over the App Lab WebUI Brick (socket.io underneath,
+// wrapped by libs/arduino.js). Python pushes a full state snapshot on the
+// "state" event about every 400ms. This file only draws what it's handed, it
+// doesn't classify or interpret anything.
 const COLOUR = {NOR:"#1a9850",LBBB:"#d73027",RBBB:"#7b3294",PVC:"#e08214",AFIB:"#c51b7d"};
 const canvas = document.getElementById('wave');
 const ctx = canvas.getContext('2d');
@@ -30,36 +29,25 @@ function draw(d){
   d.wave.forEach((v,i)=>{ const px=x(i), py=y(v); i===0?ctx.moveTo(px,py):ctx.lineTo(px,py); });
   ctx.stroke();
 
-  // Every beat is NAMED, not just dotted - including NOR, so you can read
-  // straight off the trace what the model called each beat rather than
-  // decoding a colour. A tick drops from the label to the beat it belongs
-  // to. Beats below the reporting gate (they never reach the episode table)
-  // are drawn faded with a "?" so the difference is visible rather than
-  // implied.
+  // Every beat gets a name, not just a dot, NOR included, so you can read off
+  // the trace what the model called each beat instead of decoding a colour.
+  // Beats below the reporting gate never reach the episode table, so they're
+  // drawn faded with a "?".
   //
-  // The gate is PER CLASS and comes from the board, because it differs by
-  // class and by mode (demo grades on the MIT-BIH map where LBBB/RBBB/AFIB
-  // are ungated; live uses one strict threshold). Reading it from the
-  // payload is what keeps "faded" here meaning exactly "absent from the
-  // table below".
+  // The gate is per class and comes from the board, since it differs by class
+  // and by mode. Reading it from the payload keeps "faded" here meaning
+  // exactly "not in the table below".
   const gates = d.gates || {};
 
-  // LIVE ONLY (demo is untouched): a beat below the reporting gate is
-  // drawn as NOR instead of as a faded guess at an arrhythmia.
+  // Live only, demo is untouched: a beat below the gate is drawn as NOR rather
+  // than as a faded guess at an arrhythmia. Below the gate the table already
+  // reports nothing, because on live input those calls sit near the 0.20
+  // chance level, so drawing "AFIB?" told two different stories about the same
+  // beat and the alarming one had no evidence behind it.
   //
-  // This is consistency, not whitewashing. Below the gate the episode
-  // table already reports nothing, because on live BioAmp input the
-  // model's sub-gate output sits near the 0.20 chance level - the gate
-  // exists precisely because those calls carry no information. Drawing
-  // "AFIB?" over a beat the system has decided not to report told two
-  // different stories about the same beat, and the alarming one was the
-  // one with no evidence behind it. A beat with no established finding is
-  // a normal beat, so that is what it now says.
-  //
-  // What is NOT claimed: that the model verified this beat as normal. It
-  // did not; it declined to call it anything. The honest summary of live
-  // mode is "reports an arrhythmia only when confident", and that is
-  // exactly what the trace now shows.
+  // This doesn't claim the model checked the beat and found it normal. It
+  // declined to call it anything. Live mode reports an arrhythmia only when
+  // confident, and this is what that looks like on the trace.
   const asNor = !!d.unconfident_as_nor;
   ctx.textAlign = 'center';
   let lastX = -1e9;
@@ -93,16 +81,11 @@ function draw(d){
     ctx.globalAlpha = 1;
   });
 
-  // MOTION markers - one per completed pause whose splice point falls in
-  // the visible window. This is not an axvspan like the desktop GUI shades
-  // an arrhythmia episode over, because a pause has no width on this axis:
-  // StreamAnalyzer's buffer has no gap in it, the samples right before and
-  // right after a pause are simply adjacent (see the docstring on
-  // _on_motion_state for why). So instead of a shaded span, this draws a
-  // single vertical marker exactly AT the splice point, labelled with how
-  // long that pause actually was - true to what the data can support
-  // rather than implying a stretch of visible-but-ignored waveform that
-  // was never captured.
+  // Motion markers, one per completed pause visible in the window. A single
+  // vertical line rather than a shaded span, because a pause has no width on
+  // this axis: no samples are missing from the buffer, the ones either side of
+  // a pause are just adjacent. Shading would imply a stretch of waveform we
+  // ignored, when really it was never captured. The label carries the duration.
   const MOTION_COLOUR = '#94a3b8';
   (d.motion_windows || []).forEach(w => {
     if (w.t == null) return;
