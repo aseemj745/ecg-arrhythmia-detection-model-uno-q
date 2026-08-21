@@ -10,7 +10,7 @@ runs on hardware this size, without sending anything to a cloud service.
 
 ## Status
 
-| | |
+| part | status |
 |---|---|
 | ML pipeline (train / quantize / evaluate) | Done. macro F1 0.757, see [Results](#results-held-out-patients-int8-onnx) |
 | Desktop demo GUI | Done. Dual waveform, limited to test-fold records by an automated check |
