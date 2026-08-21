@@ -17,7 +17,7 @@ home ECG monitor built around hardware this small, not a cloud service.
 | On-device deployment (Arduino App Lab) | Done and verified — live browser dashboard, no-hardware demo replay button |
 | Live BioAmp EXG Pill + MPU6050 sensor integration | Done — confirmed live on the board via the dashboard's Live Sensor button, both sensors physically wired: real-time beat classification and motion-gated episodes appear on the dashboard, not just a replay |
 
-**Fixed 2026-08-20:** the classifier previously assumed the MCU samples ECG
+**Fixed:** the classifier previously assumed the MCU samples ECG
 at 250 Hz, matching two of the reference sketches used during development.
 A real BioAmp EXG Pill capture's own timestamps measured **124.96 Hz**
 empirically (2950 samples over 23.60 real seconds), confirming the sketch
