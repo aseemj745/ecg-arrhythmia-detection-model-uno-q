@@ -56,6 +56,30 @@ scripts/exploratory/   early data-exploration scripts behind some of the design 
 
 ---
 
+## Screenshots
+
+**Desktop demo GUI** — dual waveform, healthy reference patient on top,
+monitored patient below, before any hardware was involved:
+
+<img src="docs/images/desktop_gui.png" alt="Desktop GUI: dual waveform, reference patient vs monitored patient, PVC detected and shaded" width="800">
+
+**On-device dashboard**, served directly from the Arduino UNO Q over the
+App Lab WebUI Brick — idle, replaying two different held-out MIT-BIH
+records, and running against the live BioAmp EXG Pill sensor:
+
+<img src="docs/images/dashboard_idle.png" alt="Dashboard idle, waiting for Live Sensor or Demo Replay" width="480"> <img src="docs/images/dashboard_demo_record119_pvc.png" alt="Demo Replay of MIT-BIH record 119, PVC episodes detected" width="480">
+
+<img src="docs/images/dashboard_demo_record214_lbbb.png" alt="Demo Replay of MIT-BIH record 214, LBBB and PVC episodes detected" width="480"> <img src="docs/images/dashboard_live_sensor.png" alt="Live Sensor mode, receiving real ECG data via the BioAmp EXG Pill and MCU Bridge, with a motion event logged" width="480">
+
+**Inside App Lab itself** — the serial monitor showing raw filtered ECG
+samples arriving from the MCU in real time, and `detections.csv` logging
+every episode (including a real `MOTION` event) straight from the board's
+own filesystem:
+
+<img src="docs/images/applab_serial_and_detections_csv.png" alt="Arduino App Lab IDE: serial monitor with live ECG debug output, and detections.csv with logged episodes" width="800">
+
+---
+
 ## Results (held-out patients, INT8 ONNX)
 
 The split is **patient-level**: no beat from a test patient appears anywhere

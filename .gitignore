@@ -49,3 +49,4 @@ plots/
 # One-off analysis figures generated at the repo root - same deal as plots/
 # above, the canonical copy lives in docs/images/.
 /beat_comparison.png
+/Screenshot*.png
