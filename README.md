@@ -6,6 +6,21 @@ INT8 ONNX model with 67,909 parameters, which is small enough to run in real
 time on the Arduino UNO Q's Cortex-A53. The idea is a home ECG monitor that
 runs on hardware this size, without sending anything to a cloud service.
 
+## Contents
+
+- [Status](#status)
+- [Repository layout](#repository-layout)
+- [Architecture](#architecture)
+- [Screenshots](#screenshots)
+- [Results](#results-held-out-patients-int8-onnx)
+- [How the data is split](#how-the-data-is-split)
+- [Limitations](#limitations)
+- [Pipeline](#pipeline)
+- [Design decisions](#design-decisions)
+- [Roadmap](#roadmap-towards-a-standalone-home-monitor)
+- [Data](#data)
+- [License](#license)
+
 ---
 
 ## Status
