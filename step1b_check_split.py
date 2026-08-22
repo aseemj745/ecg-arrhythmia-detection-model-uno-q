@@ -79,9 +79,7 @@ def main():
             print(f"        NOTE: test {c} comes from ONE patient - the score "
                   f"for this class is a single-patient estimate.")
 
-    # ------------------------------------------------- demo record integrity
-    # Every recording the GUI can display must be one the weights were never
-    # fitted on, otherwise the demo is an exam sat with the answer sheet.
+    # ------------------------------------------------- demo record 
     print("\n\nDEMO RECORDS OFFERED BY THE GUI")
     print("-" * 74)
     print(f"{'record':>8}{'role':>12}{'fold':>8}   status")
