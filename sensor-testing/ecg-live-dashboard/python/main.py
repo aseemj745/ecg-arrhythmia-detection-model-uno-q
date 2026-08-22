@@ -24,32 +24,6 @@ so it does both jobs in one process instead of two:
      serves the same live chart + "Run Module Now" UI as before, reading
      straight from the in-memory buffer.
 
-WHY NO FLASK / NO TOP-LEVEL NUMPY:
-  Getting third-party packages installed into the App Lab container
-  turned out to be unreliable in this environment (uv run doesn't
-  auto-install from a sibling requirements.txt, and it was still unclear
-  whether the container even has PyPI access). Rather than depend on
-  that working, the app itself (this file) now uses ONLY the Python
-  standard library -- http.server, json, csv, threading, importlib,
-  collections.deque. It needs nothing installed to start streaming real
-  sensor data and serving the dashboard.
-
-  numpy / pandas / scipy / matplotlib are still needed by
-  ecg_pqrst_detector.py (the actual P-QRST analysis), but that's now
-  imported LAZILY, only when you click "Run Module Now" in the browser.
-  If those packages aren't available, the live chart still works fine --
-  you'll just get a clear error message instead of a crashed app when
-  you try to run analysis. The PEP 723 block above still declares them,
-  in case `uv run` does manage to install them; if it doesn't, nothing
-  else breaks.
-
-Analysis module contract is unchanged: point "modpath" at pqrst_adapter.py
-(same folder), which still expects analyze(signal, fs) -> dict.
-
-DEPLOY / RUN (from the UNO Q's own shell, not a bare python3 call):
-    arduino-app-cli app start ~/ArduinoApps/ecg_uno_q_project
-    arduino-app-cli app logs  ~/ArduinoApps/ecg_uno_q_project   # to see prints
-
 VIEW:
     http://<tally-ip>:5000
 """
