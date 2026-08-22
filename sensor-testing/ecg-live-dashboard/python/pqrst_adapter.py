@@ -18,8 +18,8 @@ SETUP:
 IN THE GUI:
   Set "Analysis module (.py)" to the path of THIS file (not
   ecg_pqrst_detector.py itself), then click "Run Module".
-
-You'll see, in the results panel:
+  
+In the results panel:
   - mean_HR_bpm, HRV_SDNN_ms, mean_PR_ms, mean_QRS_ms, mean_QT_ms
   - Num R-peaks detected
   - path to the saved per-beat CSV (same ecg_parameters.csv the original
