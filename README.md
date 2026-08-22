@@ -73,6 +73,12 @@ to the Linux side, where the pipeline above (resample, R-peak detect,
 feature extraction, ONNX INT8) runs and pushes results to the dashboard
 and a CSV log.
 
+The same wiring, built:
+
+<img src="docs/images/hardware_setup_full.jpeg" alt="Full hardware setup: Arduino UNO Q, breadboard, MPU6050, and BioAmp EXG Pill electrodes on a desk, laptop showing the live dashboard" width="700">
+
+<img src="docs/images/hardware_wiring_closeup_1.jpeg" alt="Close-up of the UNO Q wired to the breadboard, MPU6050, and electrode pads" width="450"> <img src="docs/images/hardware_wiring_closeup_2.jpeg" alt="Close-up of the MPU6050 and electrode pad wiring from another angle" width="450">
+
 ---
 
 ## Screenshots
