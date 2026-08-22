@@ -24,6 +24,7 @@ runs on hardware this size, without sending anything to a cloud service.
 | This file | results, design decisions, limitations |
 | [`DEPLOY_UNO_Q.md`](DEPLOY_UNO_Q.md) | how to get the model running on the board |
 | [`applab/README.md`](applab/README.md) | how the App Lab app and its dashboard work |
+| [`sensor-testing/`](sensor-testing/) | the two apps used to calibrate and verify the BioAmp EXG Pill + MPU6050 signal chain before it went into the classifier |
 
 ## Repository layout
 
@@ -39,7 +40,23 @@ data/mitdb/            MIT-BIH database (gitignored, rebuild with step1_build_da
 artifacts/             generated dataset/model/report output (gitignored)
 docs/images/           figures used in this README
 scripts/exploratory/   early data-exploration scripts behind some of the decisions below
+sensor-testing/        two standalone apps used to calibrate and verify the BioAmp EXG
+                       Pill + MPU6050 chain before live sensing went into the classifier
 ```
+
+---
+
+## Architecture
+
+<img src="docs/images/system_block_diagram.jpeg" alt="System block diagram: BioAmp EXG Pill and MPU6050 into the STM32 MCU, over the Bridge to the QRB2210 Linux side, through the ONNX model, out to the dashboard and CSV log" width="700">
+
+<img src="docs/images/circuit_schematic.jpeg" alt="Circuit schematic: Arduino UNO Q wired to the BioAmp EXG Pill and MPU6050" width="700">
+
+The MCU side samples the BioAmp EXG Pill at 125 Hz and reads the MPU6050
+over I2C. Filtered ECG batches and motion state go over the Arduino Bridge
+to the Linux side, where the pipeline above (resample, R-peak detect,
+feature extraction, ONNX INT8) runs and pushes results to the dashboard
+and a CSV log.
 
 ---
 

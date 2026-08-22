@@ -1,0 +1,5 @@
+name: ECG Live Dashboard
+description: Reads the BioAmp EXG Pill via the STM32 sketch's Bridge batches and serves a live P-QRS-T dashboard over HTTP.
+ports: []
+bricks: []
+icon: 💓

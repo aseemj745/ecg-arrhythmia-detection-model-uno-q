@@ -1,0 +1,7 @@
+name: ECG Monitor
+description: |
+  Live ECG acquisition and P-QRS-T analysis for the Uno Q + BioAmp EXG Pill. The MCU sketch samples A0 at 250 Hz and streams batches to Linux over the Bridge; python/main.py runs a browser-based live dashboard by default (or a desktop GUI / headless CLI), with Pan-Tompkins R-peak detection and clinical interval extraction (HR, PR, QRS, QT) via pqrst_adapter.py.
+ports:
+- 5000
+bricks: []
+icon: 🫀
