@@ -1,8 +1,6 @@
 """
 ECG P-QRS-T Complex Detector & Parameter Extractor
 ====================================================
-Designed for signals acquired from the Upside Down Labs BioAmp EXG Pill.
-
 Pipeline:
   1. Bandpass + Notch filtering (removes baseline wander, muscle noise, powerline hum)
   2. Pan-Tompkins algorithm -> R-peak detection
