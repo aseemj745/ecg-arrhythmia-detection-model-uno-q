@@ -92,11 +92,7 @@ def main():
                               "dominant_class": true_major}
     print("-" * 74)
 
-    # -------------------------------------------- 3. normal vs abnormal
-    # This is what the GUI screening behaviour rests on: the demo marks a
-    # window as "something is wrong here", it does not have to name the
-    # arrhythmia correctly to be useful. A PVC called LBBB is still a
-    # correctly flagged abnormal beat.
+    # -------------------------------------------- 3. normal vs abnormal behaviour
     nor = C.CLASS_TO_IDX["NOR"]
     yb = (y != nor).astype(int)
     pb = (pred != nor).astype(int)
