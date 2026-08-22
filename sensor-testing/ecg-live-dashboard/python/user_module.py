@@ -22,8 +22,6 @@ Every other key/value pair is just shown as text in the results panel,
 so you can report whatever metrics your module computes (heart rate,
 QRS duration, classification label, confidence score, etc).
 
-The example below is a simple, dependency-light R-peak detector + heart
-rate estimator using scipy, just so you have a working reference.
 """
 
 import numpy as np
