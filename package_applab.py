@@ -6,16 +6,6 @@ Build the Arduino App Lab importable .zip.
 Produces artifacts/ecg_arrhythmia_unoq.zip, which App Lab's
 "Import an App -> Import from computer" accepts.
 
-The manifest is a best guess. App Lab 0.8.0's exact app.yaml schema hasn't
-been checked against this board, since apps live on the UNO Q itself and not
-on the PC. If the import gets rejected, don't fight it, run
-    python package_applab.py --show-manifest-help
-and follow the instructions to dump the manifest of an existing working app
-(e.g. "ECG Monitor"), then paste it back so this file can be corrected.
-
-The self-test does not depend on App Lab at all - the same folder can be
-copied to the board and run directly with python3, which is the fallback if
-importing proves fussy.
 """
 from __future__ import annotations
 
