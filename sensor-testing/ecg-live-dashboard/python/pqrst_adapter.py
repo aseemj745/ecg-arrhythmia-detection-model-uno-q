@@ -24,9 +24,6 @@ In the results panel:
   - Num R-peaks detected
   - path to the saved per-beat CSV (same ecg_parameters.csv the original
     script writes)
-And on the plot:
-  - red dots  = R peaks
-  - colored x = P, Q, S, T waves for each detected beat
 """
 
 import os
